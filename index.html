@@ -2287,10 +2287,8 @@
       let dx = ball.x - nx, dy = ball.y - ny;
       const d2 = dx * dx + dy * dy;
       if (d2 <= ball.r * ball.r) {
-        let d = Math.sqrt(d2);
-        if (d < 1e-6) {
-          const s2 = speedOf(); dx = -ball.vx / s2; dy = -ball.vy / s2; d = 1;
-        }
+        let d = Math.sqrt(d2), nx2 = nx, ny2 = ny;
+        if (d < 1e-6) { const o = insideOut(b.x, b.y, b.w, b.h); dx = o[0]; dy = o[1]; nx2 = o[2]; ny2 = o[3]; d = 1; }
         const nX = dx / d, nY = dy / d;
         const power = powerOf(ball.vx * nX + ball.vy * nY);
         ball.selfHit = false;
@@ -2300,8 +2298,8 @@
         if (state !== 'play') break brickLoop;
         if (killed) continue; // 倒した：跳ね返らずに貫通
         // 倒せなかった：削って跳ね返る
-        ball.x = nx + nX * ball.r;
-        ball.y = ny + nY * ball.r;
+        ball.x = nx2 + nX * ball.r;
+        ball.y = ny2 + nY * ball.r;
         bounce(nX, nY, 'brickHit', b.r);
         spawnParticles(b, nX, nY, 0.3);
         break brickLoop;
@@ -2686,6 +2684,18 @@
   }
 
   // ボールとボスの当たり判定
+  // ボールの中心が矩形の内側に入り込んだとき：いちばん近い辺から外へ押し出す
+  // 戻り値 [法線x, 法線y, 押し出し先の辺上のx, y]
+  const _io = [0, 0, 0, 0];
+  function insideOut(x0, y0, w, h) {
+    const l = ball.x - x0, r = x0 + w - ball.x, t = ball.y - y0, bt = y0 + h - ball.y;
+    const m = Math.min(l, r, t, bt);
+    if (m === t) { _io[0] = 0; _io[1] = -1; _io[2] = ball.x; _io[3] = y0; }
+    else if (m === bt) { _io[0] = 0; _io[1] = 1; _io[2] = ball.x; _io[3] = y0 + h; }
+    else if (m === l) { _io[0] = -1; _io[1] = 0; _io[2] = x0; _io[3] = ball.y; }
+    else { _io[0] = 1; _io[1] = 0; _io[2] = x0 + w; _io[3] = ball.y; }
+    return _io;
+  }
   function collideBoss() {
     if (!boss || boss.enter > 0) return;
     const b = boss, x0 = b.x - b.w / 2, y0 = b.y - b.h / 2;
@@ -2693,10 +2703,10 @@
     let dx = ball.x - nx, dy = ball.y - ny;
     const d2 = dx * dx + dy * dy;
     if (d2 > ball.r * ball.r) return;
-    let d = Math.sqrt(d2);
-    if (d < 1e-6) { const s2 = speedOf(); dx = -ball.vx / s2; dy = -ball.vy / s2; d = 1; }
+    let d = Math.sqrt(d2), nx2 = nx, ny2 = ny;
+    if (d < 1e-6) { const o = insideOut(x0, y0, b.w, b.h); dx = o[0]; dy = o[1]; nx2 = o[2]; ny2 = o[3]; d = 1; }
     const nX = dx / d, nY = dy / d;
-    ball.x = nx + nX * ball.r; ball.y = ny + nY * ball.r;
+    ball.x = nx2 + nX * ball.r; ball.y = ny2 + nY * ball.r;
     const power = powerOf(ball.vx * nX + ball.vy * nY);
     bounce(nX, nY, 'boss');
     ball.selfHit = false;
