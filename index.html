@@ -457,6 +457,7 @@
     spinAccel:  1.05,  // 回転をかけて打った時の加速倍率（最大回転でこの倍率、回転の強さに比例）
     beamSpeed:  1.0,   // ビームが出始める速度（画面高さ/秒）
     dmgScale:   1.0,   // ダメージ倍率
+    bossAt:     3,     // 残りブロックがこの割合(%)以下になったらボス登場（ブロックは残る）
     shotExtra:  1,     // ボスが1回に撃つ弾の追加数
     shotInterval: 0.8, // ボスが弾を撃つ間隔（倍率。小さいほど頻繁）
     // 試験機能：パドルの上下移動
@@ -507,6 +508,7 @@
     { key: 'dmgScale',   label: 'ダメージ倍率', min: 0.2, max: 3, step: 0.1 },
     { key: 'itemRate',   label: 'アイテム出現率（%）', min: 0, max: 10, step: 0.1 },
     { group: 'ボス' },
+    { key: 'bossAt',     label: 'ボス登場（残りブロック%）', min: 0, max: 20, step: 1 },
     { key: 'shotExtra',  label: '敵弾の追加数', min: 0, max: 5, step: 1 },
     { key: 'shotInterval', label: '敵弾の間隔（倍率）', min: 0.3, max: 1.5, step: 0.05 },
     { group: '上下移動（試験）' },
@@ -1849,7 +1851,8 @@
     if (key === 'bio' && !b.revived && Math.random() < 0.35) { b.reviveT = 7; }
     if (key === 'fire' && source !== 'fire') burn(b);
     if (key === 'electric' && source === 'ball') zap(b, b.maxHp * 0.5);
-    if (aliveCount <= 0 && !boss && !bossDone) spawnBoss();
+    // 残りわずかになったらボス登場（残ったブロックはそのまま。アイテムも出る）
+    if (!boss && !bossDone && aliveCount <= Math.floor(bricks.length * CFG.bossAt / 100)) spawnBoss();
     return true;
   }
 
@@ -2162,6 +2165,16 @@
   function bossDefeated() {
     const b = boss;
     SFX.bossDown();
+    // 残っていたブロックも一斉に爆発（スコアは入る）
+    let n = 0;
+    for (const k of bricks) {
+      if (!k.alive) continue;
+      k.alive = false; k.reviveT = 0;
+      score += Math.ceil(k.maxHp * rallyMult());
+      if (n++ < 40) spawnParticles(k, 0, 1, 0.5);
+    }
+    aliveCount = 0;
+    if (n) { SFX.burn(); addPopup(W / 2, brickBottom + 20, `残り${n}個 爆破！`, '#ff9f1a'); }
     for (let i = 0; i < 4; i++) explode(b.x + (Math.random() - 0.5) * b.w, b.y + (Math.random() - 0.5) * b.h + H * 0.05);
     score += 3000 * stage;
     addPopup(b.x, b.y, `+${3000 * stage}`, '#fff27a');
