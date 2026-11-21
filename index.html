@@ -34,6 +34,18 @@
     touch-action: manipulation;
   }
   #titleUI button.sub { background: rgba(255,255,255,0.14); font-size: 16px; padding: 12px 0; }
+  #optUI { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
+  .rankBox.optBox { text-align: left; }
+  .optBox h2 { text-align: center; margin-bottom: 14px; }
+  .optRow { display: block; font-size: 14px; font-weight: bold; margin-bottom: 16px; }
+  .optRow span { color: #4dd8ff; float: right; font-variant-numeric: tabular-nums; }
+  .optRow input[type=range] { display: block; width: 100%; margin-top: 10px; accent-color: #4dd8ff; touch-action: pan-x; }
+  #optName {
+    display: block; width: 100%; box-sizing: border-box; margin-top: 8px; padding: 11px; border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.25); background: #0b1020; color: #fff; font-size: 16px; font-weight: normal;
+    -webkit-user-select: text; user-select: text; touch-action: auto;
+  }
+  .optBox #optClose { display: block; margin: 4px auto 0; }
   #rankUI {
     position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.6);
     display: flex; align-items: center; justify-content: center;
@@ -142,6 +154,22 @@
   <div id="titleUI" class="hidden">
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
+    <button id="optBtn" class="sub">オプション</button>
+  </div>
+  <div id="optUI" class="hidden">
+    <div class="rankBox optBox">
+      <h2>オプション</h2>
+      <label class="optRow">ユーザー名
+        <input id="optName" maxlength="10" placeholder="ランキングに載る名前（10文字まで）" autocomplete="nickname">
+      </label>
+      <label class="optRow">BGMの音量 <span id="optBgmVal"></span>
+        <input id="optBgm" type="range" min="0" max="1" step="0.05">
+      </label>
+      <label class="optRow">効果音の音量 <span id="optSeVal"></span>
+        <input id="optSe" type="range" min="0" max="1" step="0.05">
+      </label>
+      <button id="optClose">とじる</button>
+    </div>
   </div>
   <div id="rankUI" class="hidden">
     <div class="rankBox">
@@ -3199,6 +3227,34 @@
   skipBtn.addEventListener('click', closeResult);
   resOk.addEventListener('click', closeResult);
   document.getElementById('rankClose').addEventListener('click', () => rankUI.classList.add('hidden'));
+
+  // ---- オプション（タイトル画面）：ユーザー名・BGM音量・効果音の音量 ----
+  {
+    const optUI = document.getElementById('optUI');
+    const optName = document.getElementById('optName'), optBgm = document.getElementById('optBgm'), optSe = document.getElementById('optSe');
+    const bgmVal = document.getElementById('optBgmVal'), seVal = document.getElementById('optSeVal');
+    const pct = v => Math.round(v * 100) + '%';
+    const showVals = () => { bgmVal.textContent = pct(CFG.bgmVol); seVal.textContent = pct(CFG.volume); };
+    let seTestT = 0;
+    document.getElementById('optBtn').addEventListener('click', () => {
+      SFX.init();
+      try { optName.value = localStorage.getItem('spinsmash-name') || ''; } catch (e) {}
+      optBgm.value = CFG.bgmVol; optSe.value = CFG.volume; showVals();
+      optUI.classList.remove('hidden');
+    });
+    optBgm.addEventListener('input', () => {
+      applyChange('bgmVol', parseFloat(optBgm.value)); showVals(); saveCfg();
+      if (inputs.bgmVol) { inputs.bgmVol.input.value = CFG.bgmVol; inputs.bgmVol.show(); } // ⚙パネルの表示もそろえる
+    });
+    optSe.addEventListener('input', () => {
+      applyChange('volume', parseFloat(optSe.value)); showVals(); saveCfg();
+      if (inputs.volume) { inputs.volume.input.value = CFG.volume; inputs.volume.show(); }
+      const now = performance.now(); if (now - seTestT > 150) { seTestT = now; SFX.paddle(0.6, 0.3, 0); } // 試し鳴らし
+    });
+    const saveName = () => { try { localStorage.setItem('spinsmash-name', optName.value.trim().slice(0, 10)); } catch (e) {} };
+    optName.addEventListener('change', saveName);
+    document.getElementById('optClose').addEventListener('click', () => { saveName(); optName.blur(); optUI.classList.add('hidden'); });
+  }
 
   // テスト用：ブロックを全部消してボス戦へ
   document.getElementById('bossBtn').addEventListener('click', () => {
