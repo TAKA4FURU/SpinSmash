@@ -708,6 +708,12 @@
         if (!ok('bossDown', 1000)) return;
         for (let i = 0; i < 5; i++) setTimeout(() => { tone(200, 30, 0, 0.6, 0.6); click(0.6, 800, 0.15); }, i * 160);
       },
+      // 弾を消した：パリン
+      shotBreak() {
+        if (!ok('shotBreak', 40)) return;
+        click(0.35, 4000, 0.03);
+        tone(1600, 2400, 0, 0.06, 0.12, 'triangle');
+      },
       // しびれた：ビリビリ
       stunned() {
         if (!ok('stunned', 200)) return;
@@ -965,7 +971,7 @@
     particles = []; dmgTexts = []; items = []; popups = []; zaps = []; swingHist = [];
     eff.wide = 0; eff.power = 0; eff.poison = 0; eff.barrier = 0;
     fever = 0; feverGauge = 0; stageTime = 0; windT = 0;
-    boss = null; shots = []; bossDone = false; eff.stun = 0;
+    boss = null; shots = []; bossDone = false; eff.stun = 0; eff.safe = 0;
     makeBricks(); // 先にブロック（パドルの上限がブロック位置で決まるため）
     if (!paddle) paddle = { x: W / 2, vx: 0, prevX: W / 2, vy: 0, y: null };
     paddle.y = null; targetY = null;
@@ -1361,6 +1367,20 @@
     }
 
     if (state === 'play') collideBoss();
+    // ボールで弾を消せる
+    for (const sh of shots) {
+      if (sh.dead || sh.delay > 0) continue;
+      const dx = sh.x - ball.x, dy = sh.y - ball.y, rr = ball.r + sh.size;
+      if (dx * dx + dy * dy < rr * rr) {
+        sh.dead = true;
+        score += 20;
+        SFX.shotBreak();
+        for (let i = 0; i < 6 && particles.length < 140; i++) {
+          const a = Math.random() * Math.PI * 2, v = H * (0.2 + Math.random() * 0.3);
+          particles.push({ x: sh.x, y: sh.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.35, max: 0.35, s: 2 + Math.random() * 3, color: sh.color });
+        }
+      }
+    }
 
     // 下：バリアかフィーバー中は跳ね返る
     const floorY = H - safeBottom * 0.35;
@@ -1476,7 +1496,7 @@
     { id: 'oneup',   label: '1UP',     color: '#ffd23f', w: 10 },
   ];
   let items = [];
-  const eff = { wide: 0, power: 0, poison: 0, barrier: 0, stun: 0 }; // アイテム・毒の効果時間
+  const eff = { wide: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0 }; // アイテム・毒の効果時間
   function dropItem(b) {
     let r = Math.random() * ITEMS.reduce((a, it) => a + it.w, 0), it = ITEMS[0];
     for (const x of ITEMS) { r -= x.w; if (r <= 0) { it = x; break; } }
@@ -1643,8 +1663,9 @@
       if (s.homing) s.vx += Math.sign(paddle.x - s.x) * H * s.homing * 0.4 * dt;
       s.x += (s.vx + (s.wobble ? Math.sin(s.t * 6) * H * 0.15 * s.wobble : 0)) * dt;
       s.y += s.vy * dt;
-      // パドルに当たるとしびれる
-      if (Math.abs(s.x - paddle.x) < paddle.w / 2 + s.size && s.y + s.size > paddle.y && s.y - s.size < paddle.y + paddle.h) {
+      // パドルに当たるとしびれる（しびれ中・しびれ後の無敵中は当たらない）
+      if (eff.stun <= 0 && eff.safe <= 0 &&
+          Math.abs(s.x - paddle.x) < paddle.w / 2 + s.size && s.y + s.size > paddle.y && s.y - s.size < paddle.y + paddle.h) {
         s.dead = true;
         eff.stun = boss && boss.key === 'electric' ? 1.8 : 1.2;
         SFX.stunned();
@@ -1653,7 +1674,10 @@
       if (s.y > H + 30 || s.x < -40 || s.x > W + 40) s.dead = true;
     }
     if (shots.length) shots = shots.filter(s => !s.dead);
-    if (eff.stun > 0) eff.stun = Math.max(0, eff.stun - dt);
+    if (eff.stun > 0) {
+      eff.stun = Math.max(0, eff.stun - dt);
+      if (eff.stun === 0) eff.safe = 2; // しびれが解けたら2秒間無敵
+    } else if (eff.safe > 0) eff.safe = Math.max(0, eff.safe - dt);
   }
 
   // ボールとボスの当たり判定
@@ -2268,8 +2292,10 @@
       ctx.fill();
     }
     ctx.fillStyle = eff.stun > 0 ? (Math.sin(stageTime * 40) > 0 ? '#ffe14d' : '#9aa0b8') : paddleGlow > 0.5 ? '#ffffff' : '#e8ecff';
+    if (eff.safe > 0) ctx.globalAlpha = Math.sin(stageTime * 25) > 0 ? 0.45 : 0.9; // 無敵中は点滅
     roundRect(paddle.x - paddle.w / 2, paddle.y, paddle.w, paddle.h, paddle.h / 2);
     ctx.fill();
+    ctx.globalAlpha = 1;
 
 
     if (state !== 'over' && state !== 'allClear') { drawTrail(); drawBall(); }
