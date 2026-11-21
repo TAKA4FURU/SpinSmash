@@ -468,6 +468,7 @@
     startLives: 5,     // ゲーム開始時の残機
     maxBalls:   1024,  // ボールの上限（達したら ×2〜×10 は出ない・増えない）
     itemRate:   1.4,   // 普通のブロックからアイテムが出る確率（%）。★ブロックは必ず出る
+    itemBoost:  4,     // 残りブロックが減るほど確率アップ（残り0に近づくとこの倍率）
     objScale:   0.5,   // ボールとパドルの大きさ（1, 1/2, 1/4, 1/8）
     brickScale: 0.25,  // ブロックの大きさ（1, 1/2, 1/4, 1/8。小さいほど数が増える）
     sensX:      1.5,   // 横の感度（指の移動量に対するパドルの移動量）
@@ -507,6 +508,7 @@
     { group: 'ブロック' },
     { key: 'dmgScale',   label: 'ダメージ倍率', min: 0.2, max: 3, step: 0.1 },
     { key: 'itemRate',   label: 'アイテム出現率（%）', min: 0, max: 10, step: 0.1 },
+    { key: 'itemBoost',  label: '残りが減った時の出現率（最大倍率）', min: 1, max: 10, step: 0.5 },
     { group: 'ボス' },
     { key: 'bossAt',     label: 'ボス登場（残りブロック%）', min: 0, max: 20, step: 1 },
     { key: 'shotExtra',  label: '敵弾の追加数', min: 0, max: 5, step: 1 },
@@ -1857,7 +1859,10 @@
     const s2 = speedOf() || 1;
     spawnParticles(b, -ball.vx / s2, -ball.vy / s2, 1);
     // アイテム：★ブロックは必ず、他は7%
-    if (b.type === 'I' || Math.random() < CFG.itemRate / 100 * sizeTune().item) dropItem(b);
+    // アイテム：★ブロックとボス戦中は必ず。普段は残りが減るほど出やすい（最初1倍→残り0で itemBoost 倍）
+    const used = bricks.length ? 1 - aliveCount / bricks.length : 0;
+    const rate = CFG.itemRate / 100 * sizeTune().item * (1 + (CFG.itemBoost - 1) * used);
+    if (b.type === 'I' || boss || Math.random() < rate) dropItem(b);
     const key = themeOf(stage).key;
     if (key === 'bio' && !b.revived && Math.random() < 0.35) { b.reviveT = 7; }
     if (key === 'fire' && source !== 'fire') burn(b);
