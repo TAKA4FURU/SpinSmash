@@ -2639,7 +2639,8 @@
     let alpha = 1;
     if (eff.safe > 0) alpha = Math.sin(stageTime * 25) > 0 ? 0.45 : 0.9; // しびれ後の無敵中は点滅
     if (eff.ghost > 0) alpha = Math.max(0, 1 - eff.ghost);              // 透明（最後の1秒で戻る）
-    if (alpha <= 0) return;
+    const ch = Math.max(4, h * 1.15);
+    if (alpha <= 0) { drawCockpitWindow(x, cy, cw, ch, true); return; } // 透明中も窓だけは見せる
     const stunned = eff.stun > 0;
     // ブレードの色：普段は青、しびれ中は黄色っぽく弱まる、打った瞬間は明るく
     const col = stunned ? [255, 220, 80] : [60, 150, 255];
@@ -2673,7 +2674,7 @@
     }
     ctx.globalCompositeOperation = 'source-over';
     // コックピット（金属の筒。溝と光る窓）
-    const ch = Math.max(4, h * 1.15), cx0 = x - cw / 2, cy0 = cy - ch / 2;
+    const cx0 = x - cw / 2, cy0 = cy - ch / 2;
     const mg = ctx.createLinearGradient(0, cy0, 0, cy0 + ch);
     mg.addColorStop(0, '#8a93a6'); mg.addColorStop(0.35, '#e9eef7'); mg.addColorStop(0.55, '#5a6273'); mg.addColorStop(1, '#2a2f3a');
     ctx.fillStyle = mg;
@@ -2684,15 +2685,41 @@
       const gx = cx0 + cw * (i / (grooves + 1));
       ctx.fillRect(gx - 0.75, cy0 + ch * 0.15, 1.5, ch * 0.7);
     }
-    // 中央の窓（コックピット）：しびれ中は赤く点滅しないよう落ち着いた赤に
-    ctx.fillStyle = stunned ? '#ff6b6b' : `rgba(${col[0]},${col[1]},${col[2]},0.95)`;
-    roundRect(x - cw * 0.12, cy - ch * 0.22, cw * 0.24, ch * 0.44, ch * 0.2); ctx.fill();
+    ctx.globalAlpha = 1;
+    drawCockpitWindow(x, cy, cw, ch, eff.ghost > 0);
+    ctx.globalAlpha = alpha;
     // マグネット中：刃の先端に赤と青の印（表と裏）
     if (eff.magnet > 0) {
       for (const [sx, c] of [[-1, '#ff4d6d'], [1, '#4dd8ff']]) {
         ctx.fillStyle = c;
         ctx.fillRect(x + sx * (w / 2) - (sx > 0 ? 8 : 0), cy - ch / 2 - 3, 8, 3);
         ctx.fillRect(x + sx * (w / 2) - (sx > 0 ? 8 : 0), cy + ch / 2, 8, 3);
+      }
+    }
+    ctx.restore();
+  }
+
+  // コックピットの窓：黄色（ボールの赤・水色と色も明るさも違う）＋黒い縁取り＋横長の形
+  // 色弱の人にも見分けやすい配色（Okabe-Ito の黄色）。透明中は両側に ◀ ▶ の印
+  function drawCockpitWindow(x, cy, cw, ch, ghost) {
+    const ww = Math.max(8, cw * 0.42), wh = Math.max(4, ch * 0.62);
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#F0E442';
+    ctx.strokeStyle = '#111111';
+    ctx.lineWidth = 1.5;
+    roundRect(x - ww / 2, cy - wh / 2, ww, wh, wh / 2);
+    ctx.fill(); ctx.stroke();
+    if (ghost) {
+      const s = Math.max(6, wh * 1.5), gx = ww / 2 + 3; // 窓を指す矢印（▶ 窓 ◀）
+      ctx.fillStyle = '#F0E442';
+      ctx.lineWidth = 1;
+      for (const d of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(x + d * gx, cy);
+        ctx.lineTo(x + d * (gx + s), cy - s * 0.6);
+        ctx.lineTo(x + d * (gx + s), cy + s * 0.6);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
       }
     }
     ctx.restore();
