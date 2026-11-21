@@ -463,7 +463,8 @@
     liftDecay:  1.5,   // 強打で上がった速度が元に戻る速さ
     slowPower:  0.12,
     startLives: 5,     // ゲーム開始時の残機
-    sizeScale:  1,     // 実験：ボール・ブロック・パドルの大きさ（1, 1/2, 1/4, 1/8）
+    objScale:   0.5,   // ボールとパドルの大きさ（1, 1/2, 1/4, 1/8）
+    brickScale: 0.125, // ブロックの大きさ（1, 1/2, 1/4, 1/8。小さいほど数が増える）
     sensX:      1.5,   // 横の感度（指の移動量に対するパドルの移動量）
     sensY:      1.5,   // 縦の感度  // 振り下げながら打った時の減速（1回で最大この割合だけ遅くなる）
     maxSpeed:   1.8,   // 最高速度（画面高さ/秒）
@@ -490,19 +491,19 @@
     { group: '基本' },
     { key: 'speed',      label: 'ボール速度（発射時）', min: 0.1, max: 1.5, step: 0.05 },
     { key: 'spinAccel',  label: '回転で加速（最大倍率）', min: 1, max: 1.2, step: 0.005 },
+    { key: 'maxSpeed',   label: '最高速度',     min: 0.6, max: 2.5, step: 0.05 },
     { key: 'beamSpeed',  label: 'ビーム発生速度', min: 0.2, max: 2.5, step: 0.05 },
+    { key: 'startLives', label: '残機（次のゲームから）', min: 1, max: 99, step: 1 },
+    { key: 'sensX',      label: '横の感度',     min: 0.5, max: 3, step: 0.1 },
+    { key: 'sensY',      label: '縦の感度',     min: 0.5, max: 3, step: 0.1 },
+    { key: 'paddleW',    label: 'パドル幅',     min: 0.1, max: 0.6, step: 0.01 },
+    { key: 'minVert',    label: '最小縦角度',   min: 0.1, max: 0.6, step: 0.02 },
     { group: 'ブロック' },
     { key: 'dmgScale',   label: 'ダメージ倍率', min: 0.2, max: 3, step: 0.1 },
     { group: '上下移動（試験）' },
     { key: 'liftPower',  label: '振り上げ強打', min: 0, max: 3, step: 0.1 },
     { key: 'liftDecay',  label: '強打の戻り',   min: 0, max: 5, step: 0.1 },
     { key: 'slowPower',  label: '振り下げ減速', min: 0, max: 0.4, step: 0.01 },
-    { key: 'maxSpeed',   label: '最高速度',     min: 0.6, max: 2.5, step: 0.05 },
-    { key: 'startLives', label: '残機（次のゲームから）', min: 1, max: 99, step: 1 },
-    { key: 'sensX',      label: '横の感度',     min: 0.5, max: 3, step: 0.1 },
-    { key: 'sensY',      label: '縦の感度',     min: 0.5, max: 3, step: 0.1 },
-    { key: 'paddleW',    label: 'パドル幅',     min: 0.1, max: 0.6, step: 0.01 },
-    { key: 'minVert',    label: '最小縦角度',   min: 0.1, max: 0.6, step: 0.02 },
     { group: '音' },
     { key: 'volume',     label: '音量',         min: 0, max: 1,   step: 0.05 },
     { key: 'bgmVol',     label: 'BGM音量',      min: 0, max: 1,   step: 0.05 },
@@ -1045,6 +1046,8 @@
   if (!(CFG.cfgVer >= 3)) { if (CFG.maxSpeed === 2.5) CFG.maxSpeed = DEFAULTS.maxSpeed; CFG.cfgVer = 3; }
   // 残機の初期値を3→5に変更
   if (!(CFG.cfgVer >= 4)) { if (CFG.startLives === 3) CFG.startLives = DEFAULTS.startLives; CFG.cfgVer = 4; }
+  // サイズ設定を「ボール・パドル」と「ブロック」に分けた（旧 sizeScale は使わない）
+  if (!(CFG.cfgVer >= 5)) { delete CFG.sizeScale; CFG.objScale = DEFAULTS.objScale; CFG.brickScale = DEFAULTS.brickScale; CFG.cfgVer = 5; }
   function saveCfg() { try { localStorage.setItem(STORE_KEY, JSON.stringify(CFG)); } catch (e) {} }
 
   let W, H, dpr, top, safeBottom;
@@ -1119,8 +1122,8 @@
   }
 
   function layoutPaddle() {
-    paddle.w = W * CFG.paddleW * sizeK();
-    paddle.h = Math.max(10, W * 0.035) * sizeK();
+    paddle.w = W * CFG.paddleW * objK();
+    paddle.h = Math.max(10, W * 0.035) * objK();
     paddle.baseY = H - safeBottom - paddle.h;      // 一番下（従来の位置）
     paddle.minY = Math.min(paddle.baseY, brickBottom + Math.max(12, W * 0.06)); // ブロックのすぐ下
     if (!CFG.vMove || paddle.y == null) paddle.y = paddle.baseY;
@@ -1131,7 +1134,7 @@
 
   let rowAmp = [];
   function layoutBricks() {
-    const S = sizeK(), cols = colsInStage;
+    const S = brickK(), cols = colsInStage;
     const gap = Math.max(0.5, 3 * S), side = 6;
     const bw = (W - side * 2 - gap * (cols - 1)) / cols;
     const bh = Math.max(12, H * 0.024) * S;
@@ -1199,8 +1202,9 @@
   }
   let rowsInStage = ROWS, movingRows = [];
   // サイズを小さくすると、配置図の1マスを f×f 個の小さなブロックに分ける
-  const sizeK = () => CFG.sizeScale || 1;
-  const subdiv = () => Math.max(1, Math.round(1 / sizeK()));
+  const objK = () => CFG.objScale || 1;     // ボール・パドル
+  const brickK = () => CFG.brickScale || 1; // ブロック
+  const subdiv = () => Math.max(1, Math.round(1 / brickK()));
   let colsInStage = COLS, bricksByRow = [], brickTop = 0, brickRowH = 1;
   function makeBricks() {
     bricks = [];
@@ -1221,7 +1225,7 @@
           if (t === '.') continue;
           for (let sc = 0; sc < f; sc++) {
             const type = t === 'I' && (sr || sc) ? '1' : t; // ★は1マスにつき1個だけ
-            let hp = hpAtDepth(depth) * k * sizeK();       // 小さいブロックはHPも小さく
+            let hp = hpAtDepth(depth) * k * brickK();      // 小さいブロックはHPも小さく
             if (type === 'H') hp *= 2.5;
             hp = Math.max(1, Math.round(hp));
             bricks.push({ r, c: c0 * f + sc, or: r0, type, alive: true, color: type === 'P' ? '#7cff3a' : theme.blocks[colorIdx],
@@ -1238,7 +1242,7 @@
     balls = [ball];
     trail = ball.trail;
     eff.magnet = 0; // マグネットはミスで解除
-    ball.r = Math.max(2, W * 0.022 * sizeK());
+    ball.r = Math.max(2, W * 0.022 * objK());
     ball.x = Math.max(ball.r, Math.min(W - ball.r, paddle.x));
     ball.y = paddle.y - ball.r - 1;
     ball.vx = 0; ball.vy = 0;
@@ -1297,7 +1301,7 @@
     if (!scoreSaved && score > 0) saveScore();
     state = 'title';
     if (!paddle) { paddle = { x: W / 2, vx: 0, prevX: W / 2, vy: 0, y: null }; layoutPaddle(); targetX = paddle.x; }
-    if (!ball || ball.r == null) { ball = { trail: [] }; balls = [ball]; trail = ball.trail; bricks = bricks || []; ball.r = Math.max(2, W * 0.022 * sizeK()); ball.x = W / 2; ball.y = H / 2; ball.vx = 0; ball.vy = 0; ball.spin = 0; ball.rot = 0; }
+    if (!ball || ball.r == null) { ball = { trail: [] }; balls = [ball]; trail = ball.trail; bricks = bricks || []; ball.r = Math.max(2, W * 0.022 * objK()); ball.x = W / 2; ball.y = H / 2; ball.vx = 0; ball.vy = 0; ball.spin = 0; ball.rot = 0; }
     buildBg(themeOf(1));
     SFX.music.play('title');
     setTitle(true);
@@ -1526,7 +1530,7 @@
     updateBoss(dt);
     updateShots(dt);
     // WIDE中は広がり、しびれ中は縮んで動きが鈍る
-    const wantW = W * CFG.paddleW * sizeK() * (eff.wide > 0 ? 1.5 : 1) * (eff.stun > 0 ? 0.7 : 1);
+    const wantW = W * CFG.paddleW * objK() * (eff.wide > 0 ? 1.5 : 1) * (eff.stun > 0 ? 0.7 : 1);
     paddle.w += (wantW - paddle.w) * Math.min(1, dt * 10);
     const tx = Math.min(Math.max(targetX, -paddle.w / 2), W + paddle.w / 2);
     paddle.x = eff.stun > 0 ? paddle.x + (tx - paddle.x) * Math.min(1, dt * 4) : tx;
@@ -1808,7 +1812,7 @@
     const s2 = speedOf() || 1;
     spawnParticles(b, -ball.vx / s2, -ball.vy / s2, 1);
     // アイテム：★ブロックは必ず、他は7%
-    if (b.type === 'I' || Math.random() < 0.07 * sizeK() * sizeK()) dropItem(b); // 小さいブロックは落ちにくく
+    if (b.type === 'I' || Math.random() < 0.07) dropItem(b);
     const key = themeOf(stage).key;
     if (key === 'bio' && !b.revived && Math.random() < 0.35) { b.reviveT = 7; }
     if (key === 'fire' && source !== 'fire') burn(b);
@@ -2614,7 +2618,7 @@
     drawCurrents();
     drawBoss();
 
-    const tiny = sizeK() < 0.5;
+    const tiny = brickK() < 0.5;
     for (const b of bricks) {
       if (!b.alive) continue;
       const ratio = b.hp / b.maxHp;
@@ -2808,20 +2812,21 @@
     curSection.appendChild(row);
   }
 
-  // ---- 実験：サイズ切り替え（ボール・ブロック・パドル） ----
-  {
+  // ---- サイズ切り替え：ボール・パドル／ブロックを別々に ----
+  function sizeSelector(key, title, note) {
     const wrap = document.createElement('div');
     wrap.className = 'row';
-    wrap.innerHTML = '<div class="lab"><b>サイズ（実験）</b></div><div class="key">ボール・ブロック・パドル</div>';
+    wrap.innerHTML = `<div class="lab"><b>${title}</b></div><div class="key">${note}</div>`;
     const grid = document.createElement('div'); grid.className = 'stageBtns'; grid.style.gridTemplateColumns = 'repeat(4, 1fr)';
     const opts = [[1, '1'], [0.5, '1/2'], [0.25, '1/4'], [0.125, '1/8']];
+    const mark = () => btns.forEach(([v, b]) => { b.style.background = Math.abs(CFG[key] - v) < 1e-6 ? '#3d6bff' : ''; });
     const btns = opts.map(([v, label]) => {
       const b = document.createElement('button');
       b.textContent = label;
       b.addEventListener('click', () => {
-        applyChange('sizeScale', v); saveCfg(); mark();
+        applyChange(key, v); saveCfg(); mark();
         if (state !== 'title') { // 今のステージを新しいサイズでやり直す
-          paddle.w = W * CFG.paddleW * sizeK();
+          paddle.w = W * CFG.paddleW * objK();
           loadStage(stage);
           pausedByPanel = false; setPanel(false); setPaused(false);
         }
@@ -2829,11 +2834,12 @@
       grid.appendChild(b);
       return [v, b];
     });
-    const mark = () => btns.forEach(([v, b]) => { b.style.background = Math.abs(CFG.sizeScale - v) < 1e-6 ? '#3d6bff' : ''; });
     mark();
     wrap.appendChild(grid);
     (sectionOf['基本'] || sliderBox).appendChild(wrap);
   }
+  sizeSelector('objScale', 'ボール・パドルの大きさ', 'objScale');
+  sizeSelector('brickScale', 'ブロックの大きさ', 'brickScale（小さいほど数が増える）');
 
   // ---- サウンドテスト ----
   {
