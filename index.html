@@ -406,7 +406,7 @@
     liftPower:  1.0,   // 振り上げて打った時の強打の強さ
     liftDecay:  1.5,   // 強打で上がった速度が元に戻る速さ
     slowPower:  0.12,  // 振り下げながら打った時の減速（1回で最大この割合だけ遅くなる）
-    maxSpeed:   2.5,   // 最高速度（画面高さ/秒）
+    maxSpeed:   1.8,   // 最高速度（画面高さ/秒）
     paddleW:    0.6,  // パドル幅（プレイ領域の幅比）
     minVert:    0.3,   // 縦方向の最小比（横に寝すぎ防止）
     // 音
@@ -775,6 +775,8 @@
   try { Object.assign(CFG, JSON.parse(localStorage.getItem(STORE_KEY) || '{}')); } catch (e) {}
   // 旧方式（加算）の値が残っていたら新方式（倍率）の初期値にする
   if (!(CFG.spinAccel >= 1)) CFG.spinAccel = DEFAULTS.spinAccel;
+  // 最高速度の初期値を2.5→1.8に変更（保存済みの値が旧初期値のままなら新しい値に）
+  if (!(CFG.cfgVer >= 3)) { if (CFG.maxSpeed === 2.5) CFG.maxSpeed = DEFAULTS.maxSpeed; CFG.cfgVer = 3; }
   function saveCfg() { try { localStorage.setItem(STORE_KEY, JSON.stringify(CFG)); } catch (e) {} }
 
   let W, H, dpr, top, safeBottom;
