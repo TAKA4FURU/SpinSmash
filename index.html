@@ -20,6 +20,39 @@
   canvas { display: block; flex: 1 1 auto; min-width: 0; height: 100%; }
 
   /* ---- 調整パネル ---- */
+  /* タイトル画面・ランキング */
+  .hidden { display: none !important; }
+  #titleUI {
+    position: fixed; inset: 0; z-index: 10; pointer-events: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+    gap: 14px; padding-bottom: calc(env(safe-area-inset-bottom) + 16vh);
+  }
+  #titleUI button {
+    pointer-events: auto; width: min(64vw, 260px); padding: 16px 0; border: 0; border-radius: 14px;
+    font: 900 20px -apple-system, "Hiragino Sans", sans-serif; letter-spacing: .08em; color: #fff;
+    background: linear-gradient(90deg, #ff4d6d, #4dd8ff); box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+    touch-action: manipulation;
+  }
+  #titleUI button.sub { background: rgba(255,255,255,0.14); font-size: 16px; padding: 12px 0; }
+  #rankUI {
+    position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .rankBox {
+    width: min(86vw, 360px); max-height: 80vh; overflow-y: auto; box-sizing: border-box;
+    background: #141a30; border-radius: 16px; padding: 18px; text-align: center;
+  }
+  .rankBox h2 { margin: 0 0 4px; font-size: 20px; }
+  .rankBox .note { font-size: 11px; color: #9aa6d6; margin-bottom: 10px; }
+  #rankList { list-style: none; margin: 0 0 14px; padding: 0; text-align: left; font-variant-numeric: tabular-nums; }
+  #rankList li { display: flex; gap: 10px; padding: 7px 4px; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 14px; }
+  #rankList li .no { width: 22px; color: #9aa6d6; }
+  #rankList li .sc { flex: 1; font-weight: bold; }
+  #rankList li .meta { color: #9aa6d6; font-size: 12px; }
+  .rankBox button { padding: 10px 28px; border: 0; border-radius: 10px; background: #2b3560; color: #fff; font-size: 14px; }
+  .stageBtns { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-bottom: 8px; }
+  .stageBtns button { padding: 6px 0; border: 0; border-radius: 6px; background: #2b3560; color: #fff; font-size: 12px; }
+
   /* 右上の小さなボタン（ミュート・ポーズ・設定） */
   #hudBtns {
     position: fixed; z-index: 30;
@@ -69,6 +102,18 @@
 <body>
 <div id="wrap">
   <canvas id="c"></canvas>
+  <div id="titleUI" class="hidden">
+    <button id="startBtn">スタート</button>
+    <button id="rankBtn" class="sub">ランキング</button>
+  </div>
+  <div id="rankUI" class="hidden">
+    <div class="rankBox">
+      <h2>ランキング</h2>
+      <div class="note">この端末での記録（他のプレイヤーとのランキングは準備中）</div>
+      <ol id="rankList"></ol>
+      <button id="rankClose">とじる</button>
+    </div>
+  </div>
   <div id="hudBtns">
     <button id="muteBtn" aria-label="ミュート">🔊</button>
     <button id="pauseBtn" aria-label="ポーズ">⏸</button>
@@ -77,11 +122,13 @@
   <div id="panel">
     <div class="btns">
       <button id="resetBtn">値を初期化</button>
-      <button id="restartBtn">最初から</button>
+      <button id="restartBtn">タイトルへ</button>
     </div>
     <div class="btns">
       <button id="vMoveBtn">↕ 上下移動</button>
     </div>
+    <div class="lab" style="margin-bottom:4px">ステージへ移動（テスト用）</div>
+    <div class="stageBtns" id="stageBtns"></div>
     <div class="meter">
       <div class="lab">速度 <span id="speedVal">0</span></div>
       <div class="bar"><div class="fill" id="speedFill" style="left:0"></div><div class="mid" id="beamMark"></div></div>
@@ -106,6 +153,226 @@
   const COLORS = ['#ff5d73', '#ff9f43', '#feca57', '#1dd1a1', '#48dbfb', '#a29bfe'];
   const BALL_COLOR_A = '#ff4d6d';
   const BALL_COLOR_B = '#4dd8ff';
+  const STAGES = 10;
+
+  // ---- ステージのテーマ（属性） ----
+  // bg: 背景の基本色（上下同色→中央色で継ぎ目なくループ）、blocks: 上の段→下の段の色、paint: 背景の模様
+  function rngOf(seed) {
+    return () => {
+      seed = seed + 0x6D2B79F5 | 0;
+      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  // 縦にループする背景用：はみ出した模様を反対側にも描く
+  function wrapY(th, y, size, fn) {
+    fn(y);
+    if (y - size < 0) fn(y + th);
+    if (y + size > th) fn(y - th);
+  }
+  const THEMES = [
+    { key: 'grass', name: 'くさ', bg: ['#0e2614', '#17391d'], accent: '#7ddc6a',
+      blocks: ['#1b5e20', '#2e7d32', '#43a047', '#66bb6a', '#9ccc65', '#c5e1a5'],
+      paint(g, w, th, R) {
+        for (let i = 0; i < 70; i++) {               // 草むら
+          const x = R() * w, y = R() * th, n = 3 + (R() * 4 | 0), hgt = 10 + R() * 22;
+          wrapY(th, y, hgt, yy => {
+            g.strokeStyle = `rgba(90,180,80,${0.18 + R() * 0.2})`; g.lineWidth = 1.5;
+            for (let k = 0; k < n; k++) {
+              g.beginPath(); g.moveTo(x + k * 3, yy);
+              g.quadraticCurveTo(x + k * 3 + (R() - 0.5) * 8, yy - hgt * 0.6, x + k * 3 + (R() - 0.5) * 14, yy - hgt);
+              g.stroke();
+            }
+          });
+        }
+        for (let i = 0; i < 30; i++) {               // 葉っぱ
+          const x = R() * w, y = R() * th, sz = 6 + R() * 10, a = R() * Math.PI;
+          wrapY(th, y, sz, yy => {
+            g.fillStyle = 'rgba(70,150,60,0.25)';
+            g.beginPath(); g.ellipse(x, yy, sz, sz * 0.4, a, 0, Math.PI * 2); g.fill();
+          });
+        }
+      } },
+    { key: 'water', name: 'みず', bg: ['#061d36', '#0b2f52'], accent: '#5ec8ff',
+      blocks: ['#0d47a1', '#1565c0', '#1e88e5', '#29b6f6', '#4dd0e1', '#80deea'],
+      paint(g, w, th, R) {
+        const rows = Math.round(th / 70);
+        for (let i = 0; i < rows; i++) {             // 波
+          const y0 = i * th / rows, ph = R() * 6;
+          g.strokeStyle = 'rgba(120,200,255,0.13)'; g.lineWidth = 2;
+          g.beginPath();
+          for (let x = 0; x <= w; x += 8) g.lineTo(x, y0 + Math.sin(x * 0.03 + ph) * 8);
+          g.stroke();
+        }
+        for (let i = 0; i < 45; i++) {               // 泡
+          const x = R() * w, y = R() * th, r = 2 + R() * 9;
+          wrapY(th, y, r, yy => {
+            g.strokeStyle = `rgba(170,230,255,${0.2 + R() * 0.25})`; g.lineWidth = 1.2;
+            g.beginPath(); g.arc(x, yy, r, 0, Math.PI * 2); g.stroke();
+          });
+        }
+      } },
+    { key: 'fire', name: 'ほのお', bg: ['#260a05', '#3d1408'], accent: '#ff8a3d',
+      blocks: ['#b71c1c', '#d84315', '#f4511e', '#fb8c00', '#ffb300', '#ffd54f'],
+      paint(g, w, th, R) {
+        for (let i = 0; i < 22; i++) {               // 炎のゆらめき
+          const x = R() * w, y = R() * th, s = 14 + R() * 26;
+          wrapY(th, y, s * 1.6, yy => {
+            g.fillStyle = `rgba(255,${90 + R() * 60 | 0},30,0.16)`;
+            g.beginPath(); g.moveTo(x, yy - s * 1.6);
+            g.bezierCurveTo(x + s, yy - s * 0.4, x + s * 0.7, yy + s * 0.6, x, yy + s * 0.6);
+            g.bezierCurveTo(x - s * 0.7, yy + s * 0.6, x - s, yy - s * 0.4, x, yy - s * 1.6);
+            g.fill();
+          });
+        }
+        for (let i = 0; i < 90; i++) {               // 火の粉
+          const x = R() * w, y = R() * th;
+          wrapY(th, y, 3, yy => {
+            g.fillStyle = `rgba(255,${150 + R() * 80 | 0},60,${0.3 + R() * 0.4})`;
+            g.beginPath(); g.arc(x, yy, 0.8 + R() * 1.8, 0, Math.PI * 2); g.fill();
+          });
+        }
+      } },
+    { key: 'electric', name: 'でんき', bg: ['#0f1228', '#1b1f3e'], accent: '#ffe14d',
+      blocks: ['#ff8f00', '#ffab00', '#ffc400', '#ffd600', '#ffea00', '#fff59d'],
+      paint(g, w, th, R) {
+        const n = Math.round(th / 40), step = th / n;  // 回路のグリッド
+        g.strokeStyle = 'rgba(255,230,80,0.06)'; g.lineWidth = 1;
+        for (let i = 0; i < n; i++) { g.beginPath(); g.moveTo(0, i * step); g.lineTo(w, i * step); g.stroke(); }
+        for (let x = 0; x < w; x += 40) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, th); g.stroke(); }
+        for (let i = 0; i < 10; i++) {               // 稲妻
+          const x0 = R() * w, y0 = R() * th, len = 60 + R() * 90;
+          const pts = [[x0, y0]];
+          for (let k = 0; k < 6; k++) pts.push([pts[k][0] + (R() - 0.5) * 30, pts[k][1] + len / 6]);
+          wrapY(th, y0 + len / 2, len / 2 + 10, yy => {
+            const off = yy - (y0 + len / 2);
+            g.strokeStyle = 'rgba(255,235,90,0.32)'; g.lineWidth = 2;
+            g.beginPath(); pts.forEach(([px, py], k) => k ? g.lineTo(px, py + off) : g.moveTo(px, py + off)); g.stroke();
+          });
+        }
+      } },
+    { key: 'sky', name: 'ひこう', bg: ['#173b63', '#25588a'], accent: '#bfe6ff',
+      blocks: ['#1565c0', '#1e88e5', '#42a5f5', '#90caf9', '#e3f2fd', '#fff9c4'],
+      paint(g, w, th, R) {
+        for (let i = 0; i < 14; i++) {               // 雲
+          const x = R() * w, y = R() * th, s = 20 + R() * 30;
+          wrapY(th, y, s, yy => {
+            g.fillStyle = 'rgba(255,255,255,0.13)';
+            for (let k = 0; k < 5; k++) {
+              g.beginPath(); g.ellipse(x + (k - 2) * s * 0.55, yy + (R() - 0.5) * s * 0.4, s * 0.6, s * 0.4, 0, 0, Math.PI * 2); g.fill();
+            }
+          });
+        }
+        for (let i = 0; i < 30; i++) {               // 風の筋
+          const x = R() * w, y = R() * th, len = 30 + R() * 70;
+          wrapY(th, y, len, yy => {
+            g.strokeStyle = 'rgba(255,255,255,0.12)'; g.lineWidth = 1;
+            g.beginPath(); g.moveTo(x, yy - len / 2); g.lineTo(x, yy + len / 2); g.stroke();
+          });
+        }
+      } },
+    { key: 'rock', name: 'いわ', bg: ['#241b14', '#36291e'], accent: '#d2a679',
+      blocks: ['#4e342e', '#6d4c41', '#8d6e63', '#a1887f', '#bcaaa4', '#d7ccc8'],
+      paint(g, w, th, R) {
+        for (let i = 0; i < 45; i++) {               // 岩
+          const x = R() * w, y = R() * th, s = 8 + R() * 26, n = 5 + (R() * 3 | 0);
+          const vs = []; for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2, r = s * (0.7 + R() * 0.3); vs.push([Math.cos(a) * r, Math.sin(a) * r * 0.8]); }
+          wrapY(th, y, s, yy => {
+            g.fillStyle = 'rgba(120,95,70,0.35)'; g.strokeStyle = 'rgba(30,20,12,0.5)'; g.lineWidth = 1.5;
+            g.beginPath(); vs.forEach(([vx, vy], k) => k ? g.lineTo(x + vx, yy + vy) : g.moveTo(x + vx, yy + vy)); g.closePath(); g.fill(); g.stroke();
+          });
+        }
+      } },
+    { key: 'ice', name: 'こおり', bg: ['#0b2534', '#123a50'], accent: '#a8ecff',
+      blocks: ['#01579b', '#0288d1', '#4fc3f7', '#81d4fa', '#b3e5fc', '#e1f5fe'],
+      paint(g, w, th, R) {
+        for (let i = 0; i < 20; i++) {               // 雪の結晶
+          const x = R() * w, y = R() * th, s = 8 + R() * 16;
+          wrapY(th, y, s, yy => {
+            g.strokeStyle = 'rgba(200,240,255,0.3)'; g.lineWidth = 1.2;
+            for (let k = 0; k < 6; k++) {
+              const a = k * Math.PI / 3, ex = x + Math.cos(a) * s, ey = yy + Math.sin(a) * s;
+              g.beginPath(); g.moveTo(x, yy); g.lineTo(ex, ey); g.stroke();
+              const mx = x + Math.cos(a) * s * 0.6, my = yy + Math.sin(a) * s * 0.6;
+              for (const d of [-0.6, 0.6]) { g.beginPath(); g.moveTo(mx, my); g.lineTo(mx + Math.cos(a + d) * s * 0.3, my + Math.sin(a + d) * s * 0.3); g.stroke(); }
+            }
+          });
+        }
+        for (let i = 0; i < 18; i++) {               // 氷のかけら
+          const x = R() * w, y = R() * th, s = 10 + R() * 20;
+          wrapY(th, y, s, yy => {
+            g.fillStyle = 'rgba(160,220,255,0.1)';
+            g.beginPath(); g.moveTo(x, yy - s); g.lineTo(x + s * 0.4, yy + s * 0.6); g.lineTo(x - s * 0.4, yy + s * 0.3); g.closePath(); g.fill();
+          });
+        }
+      } },
+    { key: 'poison', name: 'どく', bg: ['#1c0b28', '#2b1240'], accent: '#a6ff4d',
+      blocks: ['#4a148c', '#6a1b9a', '#8e24aa', '#ab47bc', '#76ff03', '#b2ff59'],
+      paint(g, w, th, R) {
+        for (let i = 0; i < 30; i++) {               // 毒のもや
+          const x = R() * w, y = R() * th, r = 10 + R() * 30;
+          wrapY(th, y, r, yy => { g.fillStyle = 'rgba(170,60,220,0.12)'; g.beginPath(); g.arc(x, yy, r, 0, Math.PI * 2); g.fill(); });
+        }
+        for (let i = 0; i < 16; i++) {               // しずく
+          const x = R() * w, y = R() * th, len = 20 + R() * 40;
+          wrapY(th, y, len, yy => {
+            g.strokeStyle = 'rgba(140,255,90,0.22)'; g.lineWidth = 2;
+            g.beginPath(); g.moveTo(x, yy - len); g.lineTo(x, yy); g.stroke();
+            g.fillStyle = 'rgba(140,255,90,0.3)'; g.beginPath(); g.arc(x, yy + 3, 4, 0, Math.PI * 2); g.fill();
+          });
+        }
+        for (let i = 0; i < 30; i++) {               // 泡
+          const x = R() * w, y = R() * th, r = 2 + R() * 5;
+          wrapY(th, y, r, yy => { g.strokeStyle = 'rgba(180,255,120,0.25)'; g.beginPath(); g.arc(x, yy, r, 0, Math.PI * 2); g.stroke(); });
+        }
+      } },
+    { key: 'steel', name: 'はがね', bg: ['#1a1e24', '#262c34'], accent: '#cfd8dc',
+      blocks: ['#37474f', '#455a64', '#607d8b', '#78909c', '#90a4ae', '#b0bec5'],
+      paint(g, w, th, R) {
+        const n = Math.round(th / 90), ph = th / n;  // 鉄板
+        for (let i = 0; i < n; i++) {
+          const y = i * ph, off = (i % 2) * w / 4;
+          g.strokeStyle = 'rgba(255,255,255,0.07)'; g.lineWidth = 2;
+          g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
+          for (let x = off; x < w + w / 2; x += w / 2) {
+            g.beginPath(); g.moveTo(x, y); g.lineTo(x, y + ph); g.stroke();
+            g.fillStyle = 'rgba(200,210,220,0.22)';
+            for (const [rx, ry] of [[8, 8], [-8, 8], [8, ph - 8], [-8, ph - 8]]) { g.beginPath(); g.arc(x + rx, y + ry, 2.2, 0, Math.PI * 2); g.fill(); }
+          }
+        }
+        for (let i = 0; i < 6; i++) {                // 光沢
+          const y = R() * th;
+          wrapY(th, y, 60, yy => { g.strokeStyle = 'rgba(255,255,255,0.05)'; g.lineWidth = 14; g.beginPath(); g.moveTo(0, yy + 40); g.lineTo(w, yy - 40); g.stroke(); });
+        }
+      } },
+    { key: 'bio', name: 'せいぶつ', bg: ['#26080f', '#3a0e1b'], accent: '#ff6f91',
+      blocks: ['#880e4f', '#ad1457', '#d81b60', '#ec407a', '#f48fb1', '#f8bbd0'],
+      paint(g, w, th, R) {
+        for (let i = 0; i < 26; i++) {               // 細胞
+          const x = R() * w, y = R() * th, r = 10 + R() * 22;
+          wrapY(th, y, r, yy => {
+            g.fillStyle = 'rgba(220,80,110,0.15)'; g.strokeStyle = 'rgba(255,120,150,0.25)'; g.lineWidth = 1.5;
+            g.beginPath(); g.arc(x, yy, r, 0, Math.PI * 2); g.fill(); g.stroke();
+            g.fillStyle = 'rgba(255,150,180,0.25)'; g.beginPath(); g.arc(x + r * 0.2, yy - r * 0.15, r * 0.32, 0, Math.PI * 2); g.fill();
+          });
+        }
+        for (let i = 0; i < 6; i++) {                // 触手
+          const left = i % 2 === 0, y = R() * th, len = w * (0.3 + R() * 0.25);
+          wrapY(th, y, 80, yy => {
+            const x0 = left ? -10 : w + 10, dir = left ? 1 : -1;
+            g.strokeStyle = 'rgba(180,50,90,0.35)'; g.lineWidth = 9; g.lineCap = 'round';
+            g.beginPath(); g.moveTo(x0, yy);
+            g.bezierCurveTo(x0 + dir * len * 0.4, yy - 60, x0 + dir * len * 0.7, yy + 60, x0 + dir * len, yy); g.stroke();
+            g.fillStyle = 'rgba(255,140,170,0.3)';
+            for (let k = 1; k < 6; k++) { const t = k / 6; g.beginPath(); g.arc(x0 + dir * len * t, yy + Math.sin(t * Math.PI * 2) * 22, 2.5, 0, Math.PI * 2); g.fill(); }
+          });
+        }
+      } },
+  ];
+  // ステージ順（おまかせ）：だんだん手強い印象の属性へ
+  const STAGE_ORDER = ['grass', 'water', 'fire', 'electric', 'sky', 'rock', 'ice', 'poison', 'steel', 'bio'];
+  const themeOf = n => THEMES.find(t => t.key === STAGE_ORDER[(n - 1) % STAGES]);
 
   // ---- 調整できる値（初期値） ----
   const DEFAULTS = {
@@ -126,6 +393,7 @@
     vMove:      true,  // 上下移動のオン/オフ
     liftPower:  1.0,   // 振り上げて打った時の強打の強さ
     liftDecay:  1.5,   // 強打で上がった速度が元に戻る速さ
+    slowPower:  0.12,  // 振り下げながら打った時の減速（1回で最大この割合だけ遅くなる）
     maxSpeed:   2.5,   // 最高速度（画面高さ/秒）
     paddleW:    0.6,  // パドル幅（プレイ領域の幅比）
     minVert:    0.3,   // 縦方向の最小比（横に寝すぎ防止）
@@ -154,6 +422,7 @@
     { group: '上下移動（試験）' },
     { key: 'liftPower',  label: '振り上げ強打', min: 0, max: 3, step: 0.1 },
     { key: 'liftDecay',  label: '強打の戻り',   min: 0, max: 5, step: 0.1 },
+    { key: 'slowPower',  label: '振り下げ減速', min: 0, max: 0.4, step: 0.01 },
     { key: 'maxSpeed',   label: '最高速度',     min: 0.6, max: 2.5, step: 0.05 },
     { key: 'paddleW',    label: 'パドル幅',     min: 0.1, max: 0.6, step: 0.01 },
     { key: 'minVert',    label: '最小縦角度',   min: 0.1, max: 0.6, step: 0.02 },
@@ -355,6 +624,24 @@
         whoosh(1, 0.8);
         tone(90, 45, 0.05, 0.4, 0.45);
       },
+      // 減速：「ヒュゥン」と下がっていく音
+      powerDown(amount) {
+        if (!ok('powerDown', 80)) return;
+        const t = ac.currentTime + 0.02, dur = 0.25 + 0.25 * amount;
+        const lp = ac.createBiquadFilter();
+        lp.type = 'lowpass'; lp.Q.value = 6;
+        lp.frequency.setValueAtTime(4000, t);
+        lp.frequency.exponentialRampToValueAtTime(300, t + dur);
+        const g = ac.createGain();
+        g.gain.setValueAtTime(0.25 + 0.15 * amount, t);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        lp.connect(g); g.connect(master);
+        const o = ac.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(900, t);
+        o.frequency.exponentialRampToValueAtTime(160, t + dur);
+        o.connect(lp); o.start(t); o.stop(t + dur + 0.02);
+      },
       // 自爆：ドカーン
       selfDestruct() {
         if (!ok('selfDestruct', 300)) return;
@@ -394,11 +681,52 @@
   let W, H, dpr, top, safeBottom;
   let paddle, ball, bricks, score, lives, state, targetX, targetY, paused = false, panelOpen = false;
   let brickBottom = 0;            // ブロック領域の下端
+  let stage = 1, stageTimer = 0, scoreSaved = false;
   let touchStartY = 0, paddleStartY = 0;
   // 演出用
   let rally = 0, chain = 0, bestRally = 0;
   let paddleGlow = 0, rallyPop = 0;
   let trail = [], particles = [], dmgTexts = [], banner = null;
+
+  // ---- 背景：テーマの模様を1枚描いておき、上から下へスクロール ----
+  let bgTile = null, bgOffset = 0, bgTheme = null;
+  const streaks = Array.from({ length: 16 }, () => ({ x: Math.random(), y: Math.random(), len: 0.04 + Math.random() * 0.08, sp: 1.6 + Math.random() * 1.6 }));
+  function buildBg(theme) {
+    bgTheme = theme;
+    const th = Math.ceil(H * 1.6);
+    const c = document.createElement('canvas');
+    c.width = Math.ceil(W * dpr); c.height = Math.ceil(th * dpr);
+    const g = c.getContext('2d');
+    g.scale(dpr, dpr);
+    const grad = g.createLinearGradient(0, 0, 0, th);
+    grad.addColorStop(0, theme.bg[0]); grad.addColorStop(0.5, theme.bg[1]); grad.addColorStop(1, theme.bg[0]);
+    g.fillStyle = grad; g.fillRect(0, 0, W, th);
+    theme.paint(g, W, th, rngOf(STAGE_ORDER.indexOf(theme.key) * 97 + 13));
+    bgTile = { c, th };
+  }
+  function drawBg() {
+    if (!bgTile) return;
+    const th = bgTile.th, y0 = bgOffset % th;
+    ctx.drawImage(bgTile.c, 0, y0 - th, W, th);
+    ctx.drawImage(bgTile.c, 0, y0, W, th);
+    // 高速で前進している感じの光の筋
+    if (CFG.fx > 0) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.09)'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (const s of streaks) {
+        const x = s.x * W, y = (s.y * H) % H;
+        ctx.moveTo(x, y); ctx.lineTo(x, y + s.len * H);
+      }
+      ctx.stroke();
+    }
+  }
+  function updateBg(dt) {
+    // ボールが速いほどスクロールも速く
+    const v = (state === 'play' && ball && ball.vx != null) ? speedOf() / H : 0;
+    const sp = H * (0.25 + 0.35 * Math.min(1, v / Math.max(CFG.maxSpeed, 0.1)));
+    bgOffset += sp * dt;
+    for (const s of streaks) { s.y += s.sp * sp / H * dt; if (s.y > 1.1) { s.y -= 1.2; s.x = Math.random(); } }
+  }
 
   // ---- 画面サイズに合わせてレイアウト ----
   function resize() {
@@ -411,6 +739,7 @@
     safeBottom = Math.max(40, H * 0.08);
     if (bricks) layoutBricks();
     if (paddle) layoutPaddle();
+    if (bgTheme) buildBg(bgTheme);
   }
 
   function layoutPaddle() {
@@ -460,11 +789,16 @@
     return Math.round((DMG_MIN + (DMG_MAX - DMG_MIN) * u * u) * CFG.dmgScale);
   }
 
+  // ステージが進むほどブロックが硬くなる（第10ステージで約2倍）
+  const hpScaleOf = n => 1 + 0.11 * (n - 1);
   function makeBricks() {
     bricks = [];
+    const theme = themeOf(stage), k = hpScaleOf(stage);
     for (let r = 0; r < ROWS; r++)
-      for (let c = 0; c < COLS; c++)
-        bricks.push({ r, c, alive: true, color: COLORS[r], hp: HP_BY_ROW[r], maxHp: HP_BY_ROW[r], cracks: makeCracks(), hitT: 0 });
+      for (let c = 0; c < COLS; c++) {
+        const hp = Math.round(HP_BY_ROW[r] * k);
+        bricks.push({ r, c, alive: true, color: theme.blocks[r], hp, maxHp: hp, cracks: makeCracks(), hitT: 0 });
+      }
     layoutBricks();
   }
 
@@ -490,15 +824,47 @@
     state = 'play';
   }
 
-  function newGame() {
-    score = 0; lives = LIVES; bestRally = 0; particles = []; dmgTexts = [];
+  // ステージ開始（ブロック・背景・ボールを用意して発射待ち）
+  function loadStage(n) {
+    stage = n;
+    particles = []; dmgTexts = [];
     makeBricks(); // 先にブロック（パドルの上限がブロック位置で決まるため）
-    paddle = { x: W / 2, vx: 0, prevX: W / 2, vy: 0, y: null };
-    targetY = null;
+    if (!paddle) paddle = { x: W / 2, vx: 0, prevX: W / 2, vy: 0, y: null };
+    paddle.y = null; targetY = null;
     layoutPaddle();
     targetX = paddle.x;
     ball = {};
     resetBall();
+    buildBg(themeOf(n));
+    const t = themeOf(n);
+    banner = { text: `STAGE ${n}`, sub: t.name, color: t.accent, life: 2.2 };
+  }
+
+  function newGame(startStage) {
+    score = 0; lives = LIVES; bestRally = 0; scoreSaved = false;
+    setTitle(false);
+    loadStage(startStage || 1);
+  }
+
+  function goTitle() {
+    if (!scoreSaved && score > 0) saveScore();
+    state = 'title';
+    if (!paddle) { paddle = { x: W / 2, vx: 0, prevX: W / 2, vy: 0, y: null }; layoutPaddle(); targetX = paddle.x; }
+    if (!ball || ball.r == null) { ball = {}; bricks = bricks || []; ball.r = Math.max(6, W * 0.022); ball.x = W / 2; ball.y = H / 2; ball.vx = 0; ball.vy = 0; ball.spin = 0; ball.rot = 0; }
+    buildBg(themeOf(1));
+    setTitle(true);
+  }
+
+  // ---- 端末内ランキング（オンラインは段階⑤で追加） ----
+  const SCORE_KEY = 'spinsmash-scores';
+  function loadScores() { try { return JSON.parse(localStorage.getItem(SCORE_KEY) || '[]'); } catch (e) { return []; } }
+  function saveScore() {
+    scoreSaved = true;
+    const list = loadScores();
+    const d = new Date();
+    list.push({ score, stage, rally: bestRally, date: `${d.getMonth() + 1}/${d.getDate()}` });
+    list.sort((a, b) => b.score - a.score);
+    try { localStorage.setItem(SCORE_KEY, JSON.stringify(list.slice(0, 10))); } catch (e) {}
   }
 
   // ---- 入力（指ドラッグ） ----
@@ -527,12 +893,12 @@
     e.preventDefault();
     if (panelOpen) { setPanel(false); return; } // パネル外をタップで閉じる
     SFX.init(); // iOSは画面に触れた時に音を有効化する必要がある
-    if (paused) return;
+    if (paused || state === 'title' || state === 'stageClear') return;
     const x = pointerX(e);
     if (x !== null) targetX = x;
     startVertical(e);
     if (state === 'ready') { launch(); SFX.paddle(0.5, 0, 0); }
-    else if (state === 'over' || state === 'clear') newGame();
+    else if (state === 'over' || state === 'allClear') goTitle();
   }
   function onMove(e) {
     e.preventDefault();
@@ -659,7 +1025,17 @@
   }
 
   function update(dt) {
+    updateBg(dt);
+    if (state === 'title') return;
     updateFx(dt);
+    if (state === 'stageClear') {
+      stageTimer -= dt;
+      if (stageTimer <= 0) {
+        if (stage >= STAGES) { state = 'allClear'; saveScore(); }
+        else loadStage(stage + 1);
+      }
+      return;
+    }
     paddle.x = Math.min(Math.max(targetX, paddle.w / 2), W - paddle.w / 2);
     const instVx = (paddle.x - paddle.prevX) / Math.max(dt, 1e-3);
     paddle.vx += (instVx - paddle.vx) * 0.5;
@@ -704,8 +1080,17 @@
     // 回転の強さ：かけた量と打球後の回転の大きい方
     const maxS = H * Math.max(CFG.maxSpin, 0.01);
     const spinAmt = Math.min(1, Math.max(Math.abs(ball.spin - spin0), Math.abs(ball.spin)) / maxS);
-    // 回転をかけるほど加速
-    if (spinAmt > 0.05 && CFG.spinAccel > 1) {
+    // 打つ向きと逆へ振りながら打つと減速（速くなりすぎた時の救済）。少しずつ下がる
+    const away = Math.max(0, -dir * paddle.vy);
+    let braked = 0;
+    if (CFG.vMove && away > H * 0.15 && CFG.slowPower > 0) {
+      const f = Math.min(1, away / (H * 1.5));
+      const before = speedOf();
+      const after = Math.max(H * CFG.speed, before * (1 - CFG.slowPower * f));
+      if (after < before * 0.995) { setSpeed(after); braked = f; }
+    }
+    // 回転をかけるほど加速（減速した打球では加速しない）
+    if (!braked && spinAmt > 0.05 && CFG.spinAccel > 1) {
       const before = speedOf();
       const mul = 1 + (CFG.spinAccel - 1) * spinAmt; // 最大回転で spinAccel 倍
       const after = Math.min(before * mul, H * CFG.maxSpeed);
@@ -730,6 +1115,7 @@
     rally++; chain = 0;
     bestRally = Math.max(bestRally, rally);
     SFX.paddle(power, spinAmt, rally);
+    if (braked) SFX.powerDown(braked);
     if (rally % 5 === 0) SFX.rallyUp(rally);
     paddleGlow = 1;
     rallyPop = 1;
@@ -804,7 +1190,13 @@
           chain++;
           SFX.brick(b.r, power, chain, true);
           spawnParticles(b, -ball.vx / speedOf(), -ball.vy / speedOf(), 1);
-          if (bricks.every(k => !k.alive)) { state = 'clear'; SFX.clear(); break; }
+          if (bricks.every(k => !k.alive)) {
+            // ステージクリア：残機ボーナス
+            state = 'stageClear'; stageTimer = 2.4; SFX.clear();
+            score += 500 * stage;
+            banner = { text: 'STAGE CLEAR!', sub: `ボーナス +${500 * stage}`, color: '#fff27a', life: 2.2 };
+            break;
+          }
           continue; // 同じ瞬間に触れている他のブロックも判定
         }
         // 倒せなかった：削って跳ね返る
@@ -823,7 +1215,7 @@
       // ミス（自分で下へ打ち込んだ自爆も同じ）：ドカーン＋破片
       SFX.selfDestruct();
       explode(ball.x, H - 4);
-      if (lives <= 0) state = 'over';
+      if (lives <= 0) { state = 'over'; saveScore(); }
       else resetBall();
     }
   }
@@ -999,15 +1391,48 @@
     ctx.fill();
   }
 
-  function draw() {
-    ctx.fillStyle = '#0b1020';
-    ctx.fillRect(0, 0, W, H);
+  // タイトルのロゴ（回転する2色ボール付き）
+  function drawTitle() {
+    const t = performance.now() / 1000;
+    const cx = W / 2, cy = H * 0.3, size = Math.min(W * 0.17, 72);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `italic 900 ${size}px -apple-system, "Hiragino Sans", sans-serif`;
+    for (const [txt, y] of [['SPIN', cy - size * 0.55], ['SMASH', cy + size * 0.55]]) {
+      const grad = ctx.createLinearGradient(cx - size * 2, 0, cx + size * 2, 0);
+      grad.addColorStop(0, BALL_COLOR_A); grad.addColorStop(1, BALL_COLOR_B);
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillText(txt, cx + 3, y + 4);
+      ctx.fillStyle = grad;
+      ctx.fillText(txt, cx, y);
+    }
+    // ロゴ下で回転するボール
+    const r = size * 0.32, bx = cx, by = cy + size * 1.6, rot = t * 9;
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath(); ctx.arc(bx, by, r * 1.8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = BALL_COLOR_A; ctx.beginPath(); ctx.moveTo(bx, by); ctx.arc(bx, by, r, rot + Math.PI / 2, rot + Math.PI * 1.5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = BALL_COLOR_B; ctx.beginPath(); ctx.moveTo(bx, by); ctx.arc(bx, by, r, rot - Math.PI / 2, rot + Math.PI / 2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = '13px -apple-system, "Hiragino Sans", sans-serif';
+    ctx.fillText('回転をかけて、加速して、撃ち抜け', cx, by + r * 3);
+  }
 
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 16px -apple-system, "Hiragino Sans", sans-serif';
+  function draw() {
+    drawBg();
+    if (state === 'title') { drawTitle(); return; }
+
+    // HUD（背景の上で読みやすいよう帯を敷く）
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(0, 0, W, top);
+    const th = themeOf(stage);
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
-    ctx.fillText('SCORE ' + score, 10, top / 2 + 8);
+    ctx.fillStyle = th.accent;
+    ctx.font = 'bold 11px -apple-system, "Hiragino Sans", sans-serif';
+    ctx.fillText(`STAGE ${stage}  ${th.name}`, 10, top / 2 - 4);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 16px -apple-system, "Hiragino Sans", sans-serif';
+    ctx.fillText('SCORE ' + score, 10, top / 2 + 12);
     ctx.textAlign = 'right';
     ctx.fillText('♥'.repeat(Math.max(lives, 0)), W - 140, top / 2 + 8); // 右上ボタンの左
     ctx.fillStyle = 'rgba(255,255,255,0.15)';
@@ -1076,18 +1501,23 @@
       ctx.globalAlpha = 1;
     }
 
-    // 自爆などの大きな表示
+    // ステージ開始・クリアなどの大きな表示
     if (banner) {
       const k = Math.min(1, banner.life / 0.4);
-      const sc = 1 + 0.4 * Math.max(0, banner.life - 0.9);
+      const sc = 1 + 0.3 * Math.max(0, banner.life - 1.9);
       ctx.globalAlpha = k;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.font = `900 ${Math.round(W * 0.16 * sc)}px -apple-system, "Hiragino Sans", sans-serif`;
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.fillText(banner.text, W / 2 + 2, H * 0.68 + 2);
-      ctx.fillStyle = '#ff7a1a';
-      ctx.fillText(banner.text, W / 2, H * 0.68);
+      ctx.font = `italic 900 ${Math.round(W * 0.12 * sc)}px -apple-system, "Hiragino Sans", sans-serif`;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillText(banner.text, W / 2 + 2, H * 0.44 + 3);
+      ctx.fillStyle = banner.color || '#ffffff';
+      ctx.fillText(banner.text, W / 2, H * 0.44);
+      if (banner.sub) {
+        ctx.font = `bold ${Math.round(W * 0.06)}px -apple-system, "Hiragino Sans", sans-serif`;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(banner.sub, W / 2, H * 0.44 + W * 0.11);
+      }
       ctx.globalAlpha = 1;
     }
 
@@ -1103,15 +1533,15 @@
     ctx.fill();
 
 
-    if (state !== 'over') { drawTrail(); drawBall(); }
+    if (state !== 'over' && state !== 'allClear') { drawTrail(); drawBall(); }
 
 
 
     let msg = null, sub = null;
     if (paused)                 { msg = 'PAUSE'; sub = panelOpen ? '⚙ で閉じると再開' : '右上の ▶ で再開'; }
-    else if (state === 'ready') { msg = 'タップでスタート'; sub = '打つ瞬間に横へ擦ると回転'; }
-    else if (state === 'over')  { msg = 'GAME OVER'; sub = `最高 ${bestRally} ラリー / タップでもう一度`; }
-    else if (state === 'clear') { msg = 'CLEAR!'; sub = 'タップでもう一度'; }
+    else if (state === 'ready' && !banner) { msg = 'タップで発射'; sub = '横に擦ると回転・上に振ると強打・下に振ると減速'; }
+    else if (state === 'over')  { msg = 'GAME OVER'; sub = `SCORE ${score} / 最高 ${bestRally} ラリー / タップでタイトルへ`; }
+    else if (state === 'allClear') { msg = 'ALL CLEAR!!'; sub = `SCORE ${score} / タップでタイトルへ`; }
     if (msg) {
       if (paused) { ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, 0, W, H); }
       ctx.textAlign = 'center';
@@ -1220,7 +1650,38 @@
     }
     saveCfg();
   });
-  document.getElementById('restartBtn').addEventListener('click', () => { newGame(); pausedByPanel = false; setPanel(false); setPaused(false); });
+  document.getElementById('restartBtn').addEventListener('click', () => { goTitle(); pausedByPanel = false; setPanel(false); setPaused(false); });
+  // ---- タイトル画面 ----
+  const titleUI = document.getElementById('titleUI');
+  const rankUI = document.getElementById('rankUI');
+  function setTitle(show) {
+    titleUI.classList.toggle('hidden', !show);
+    pauseBtn.classList.toggle('hidden', show);
+    if (show) rankUI.classList.add('hidden');
+  }
+  document.getElementById('startBtn').addEventListener('click', () => { SFX.init(); newGame(1); });
+  document.getElementById('rankBtn').addEventListener('click', () => {
+    SFX.init();
+    const list = loadScores();
+    document.getElementById('rankList').innerHTML = list.length
+      ? list.map((r, i) => `<li><span class="no">${i + 1}</span><span class="sc">${r.score}</span><span class="meta">STAGE ${r.stage}・${r.date}</span></li>`).join('')
+      : '<li><span class="meta">まだ記録がありません</span></li>';
+    rankUI.classList.remove('hidden');
+  });
+  document.getElementById('rankClose').addEventListener('click', () => rankUI.classList.add('hidden'));
+
+  // テスト用：ステージへ直接移動
+  const stageBtns = document.getElementById('stageBtns');
+  for (let n = 1; n <= STAGES; n++) {
+    const b = document.createElement('button');
+    b.textContent = n;
+    b.addEventListener('click', () => {
+      if (state === 'title') newGame(n); else loadStage(n);
+      pausedByPanel = false; setPanel(false); setPaused(false);
+    });
+    stageBtns.appendChild(b);
+  }
+
   // アプリ切替などで非表示になったら自動ポーズ
   document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') setPaused(true); });
 
@@ -1246,7 +1707,7 @@
 
   function updateMeter() {
     updateSpeedMeter();
-    const ratio = Math.max(-1, Math.min(1, ball.spin / (H * Math.max(CFG.maxSpin, 0.01))));
+    const ratio = Math.max(-1, Math.min(1, (ball.spin || 0) / (H * Math.max(CFG.maxSpin, 0.01))));
     const pct = Math.round(ratio * 100);
     if (pct === lastMeter) return;
     lastMeter = pct;
@@ -1268,7 +1729,7 @@
   }
 
   resize();
-  newGame();
+  goTitle();
   requestAnimationFrame(loop);
 })();
 </script>
