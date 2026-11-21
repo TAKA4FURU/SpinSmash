@@ -1814,7 +1814,8 @@
   // ブロックにダメージ。倒したら true
   function damageBrick(b, raw, source, power) {
     if (!b.alive) return false;
-    const dmg = Math.min(Math.max(0, raw - (fever > 0 ? 0 : armorOf())), b.hp);
+    // 回復で残りHPが小数になることがあるので、ダメージは切り上げて整数にする
+    const dmg = Math.ceil(Math.min(Math.max(0, raw - (fever > 0 ? 0 : armorOf())), b.hp));
     b.hitT = 1;
     b.lastHit = stageTime;
     if (dmg <= 0) {
@@ -1833,7 +1834,7 @@
     b.alive = false;
     aliveCount--;
     chain++;
-    score += Math.round(b.maxHp * rallyMult() * (fever > 0 ? 2 : 1));
+    score += Math.ceil(b.maxHp * rallyMult() * (fever > 0 ? 2 : 1));
     SFX.brick(b.r, power || 0.6, chain, true);
     const s2 = speedOf() || 1;
     spawnParticles(b, -ball.vx / s2, -ball.vy / s2, 1);
@@ -2143,12 +2144,12 @@
     b.invHits = 0;
     b.inv = 0.35;
     const raw = fever > 0 ? Math.max(150, ballDamage()) : ballDamage();
-    const dmg = Math.min(b.hp, Math.max(0, raw - armorOf()));
+    const dmg = Math.ceil(Math.min(b.hp, Math.max(0, raw - armorOf())));
     b.hitT = 1;
     dmgTexts.push({ x: ball.x, y: ball.y - 10, text: dmg > 0 ? `${dmg}` : '0', kill: false, life: 0.7 });
     if (dmg <= 0) { SFX.clank(); return; }
     b.hp -= dmg;
-    score += Math.round(dmg * rallyMult() * (fever > 0 ? 2 : 1));
+    score += Math.ceil(dmg * rallyMult() * (fever > 0 ? 2 : 1));
     SFX.bossHit(power);
     if (b.hp <= 0) bossDefeated();
   }
