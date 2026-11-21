@@ -469,7 +469,7 @@
     maxBalls:   1024,  // ボールの上限（達したら ×2〜×10 は出ない・増えない）
     itemRate:   1.4,   // 普通のブロックからアイテムが出る確率（%）。★ブロックは必ず出る
     objScale:   0.5,   // ボールとパドルの大きさ（1, 1/2, 1/4, 1/8）
-    brickScale: 0.125, // ブロックの大きさ（1, 1/2, 1/4, 1/8。小さいほど数が増える）
+    brickScale: 0.25,  // ブロックの大きさ（1, 1/2, 1/4, 1/8。小さいほど数が増える）
     sensX:      1.5,   // 横の感度（指の移動量に対するパドルの移動量）
     sensY:      1.5,   // 縦の感度  // 振り下げながら打った時の減速（1回で最大この割合だけ遅くなる）
     maxSpeed:   1.8,   // 最高速度（画面高さ/秒）
@@ -1061,6 +1061,8 @@
   if (!(CFG.cfgVer >= 6)) { if (CFG.maxBalls === 1000) CFG.maxBalls = DEFAULTS.maxBalls; }
   if (!(CFG.cfgVer >= 5)) { delete CFG.sizeScale; CFG.objScale = DEFAULTS.objScale; CFG.brickScale = DEFAULTS.brickScale; CFG.cfgVer = 5; }
   if (!(CFG.cfgVer >= 6)) CFG.cfgVer = 6;
+  // ブロックの初期値を1/8→1/4に変更
+  if (!(CFG.cfgVer >= 7)) { if (CFG.brickScale === 0.125) CFG.brickScale = DEFAULTS.brickScale; CFG.cfgVer = 7; }
   function saveCfg() { try { localStorage.setItem(STORE_KEY, JSON.stringify(CFG)); } catch (e) {} }
 
   let W, H, dpr, top, safeBottom;
@@ -1077,7 +1079,7 @@
   function useBall(b) { ball = b; trail = b.trail || (b.trail = []); }
   // ビーム付きで描くボールの数（多い時は減らして軽くする）
   const beamLimit = () => balls.length > 100 ? 3 : balls.length > 30 ? 6 : 12;
-  let fingerDown = false, releasing = false;
+  let fingerDown = false, fingers = 0, releasing = false; // fingers=ゲーム画面に触れている指の数
 
   // ---- 背景：テーマの模様を1枚描いておき、上から下へスクロール ----
   let bgTile = null, bgOffset = 0, bgTheme = null, streakLen = 0;
@@ -1289,7 +1291,7 @@
   function loadStage(n) {
     stage = n;
     particles = []; dmgTexts = []; items = []; popups = []; zaps = []; swingHist = [];
-    eff.wide = 0; eff.power = 0; eff.poison = 0; eff.barrier = 0;
+    eff.wide = 0; eff.wideLv = 0; eff.power = 0; eff.poison = 0; eff.barrier = 0;
     fever = 0; feverGauge = 0; stageTime = 0; windT = 0;
     SFX.music.setFever(false);
     boss = null; shots = []; bossDone = false; eff.stun = 0; eff.safe = 0;
@@ -1342,14 +1344,18 @@
   }
 
   // ---- 入力（指ドラッグ） ----
+  // 操作に使うのはゲーム画面に触れている1本目の指（巻き戻しボタンの指は数えない）
+  const firstTouch = e => e.targetTouches ? e.targetTouches[0] : e.touches ? e.touches[0] : e;
   function pointerX(e) {
-    const t = e.touches ? e.touches[0] : e;
+    const t = firstTouch(e);
     return t ? t.clientX - cv.getBoundingClientRect().left : null;
   }
   function pointerY(e) {
-    const t = e.touches ? e.touches[0] : e;
+    const t = firstTouch(e);
     return t ? t.clientY : null;
   }
+  // 画面に触れている指の数（マウスはShiftを押しながらで2本指の代わり）
+  const countFingers = e => e.targetTouches ? e.targetTouches.length : (e.buttons || e.type === 'mousedown') ? (e.shiftKey ? 2 : 1) : 0;
   // 縦は「触れた位置からの移動量」で動かす（タップした場所へ瞬間移動しない）
   // 縦横とも「触れた位置から指を動かした量 × 感度」で動かす
   let touchStartX = 0, paddleStartX = 0;
@@ -1381,7 +1387,8 @@
     if (panelOpen) { setPanel(false); return; } // パネル外をタップで閉じる
     SFX.init(); // iOSは画面に触れた時に音を有効化する必要がある
     if (paused || state === 'title' || state === 'stageClear') return;
-    startDrag(e);
+    startDrag(e); // 指が増えても、今の位置から続けて動かせるよう基準を取り直す
+    fingers = countFingers(e);
     fingerDown = true;
     if (state === 'ready') { launch(); SFX.paddle(0.5, 0, 0); }
     else if (state === 'over' || state === 'allClear') openResult();
@@ -1400,9 +1407,10 @@
     if (balls.length) useBall(balls[0]);
   }
   function onUp(e) {
-    if (e.touches && e.touches.length) return; // まだ別の指が触れている
-    fingerDown = false;
-    releaseStuck();
+    fingers = e.targetTouches ? e.targetTouches.length : 0;
+    fingerDown = fingers > 0;
+    if (fingers < 2) releaseStuck();         // 2本指でなくなったら、吸着中のボールを弾く
+    if (fingers > 0) startDrag(e);           // 残った指で、パドルが飛ばないよう続けて操作
   }
   function onMove(e) {
     e.preventDefault();
@@ -1554,7 +1562,7 @@
     updateBoss(dt);
     updateShots(dt);
     // WIDE中は広がり、しびれ中は縮んで動きが鈍る
-    const wantW = W * CFG.paddleW * objK() * (eff.wide > 0 ? 1.5 : 1) * (eff.stun > 0 ? 0.7 : 1);
+    const wantW = W * CFG.paddleW * objK() * WIDE_MULT[eff.wide > 0 ? eff.wideLv : 0] * (eff.stun > 0 ? 0.7 : 1);
     paddle.w += (wantW - paddle.w) * Math.min(1, dt * 10);
     const tx = Math.min(Math.max(targetX, -paddle.w / 2), W + paddle.w / 2);
     paddle.x = eff.stun > 0 ? paddle.x + (tx - paddle.x) * Math.min(1, dt * 4) : tx;
@@ -1599,7 +1607,7 @@
   // dir = -1：表で上へ打つ / +1：裏で下へ打つ（自爆の危険）
   function hitPaddle(dir) {
     // マグネット：指を置いている間は表でも裏でも、当たったボールが吸着（指を離すと弾く）
-    if (eff.magnet > 0 && fingerDown && !releasing) {
+    if (eff.magnet > 0 && fingers >= 2 && !releasing) { // 2本指の時だけ吸着
       if (ball.extra) { setSpeed(Math.max(speedOf() - ball.extra, H * 0.05)); ball.extra = 0; }
       ball.stuckSpeed = Math.max(speedOf(), H * CFG.speed);
       ball.stuck = Math.max(-paddle.w / 2, Math.min(paddle.w / 2, ball.x - paddle.x));
@@ -1784,7 +1792,7 @@
     if (ball.vy > 0 && ball.y + ball.r >= floorY && (eff.barrier > 0 || fever > 0)) {
       ball.y = floorY - ball.r;
       ball.vy = -Math.abs(ball.vy);
-      if (fever <= 0) { eff.barrier = 0; addPopup(ball.x, floorY - 20, 'BARRIER!', '#7df9ff'); }
+      if (fever <= 0) { eff.barrier--; addPopup(ball.x, floorY - 20, eff.barrier > 0 ? `BARRIER! のこり${eff.barrier}` : 'BARRIER!', '#7df9ff'); }
       SFX.wall(1);
     }
 
@@ -1911,7 +1919,8 @@
     { id: 'ghost',   label: '透明',    color: '#3a3f55', w: 8, text: '#9aa0b8' }, // ハズレ
   ];
   let items = [];
-  const eff = { wide: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0 }; // アイテム・毒の効果時間
+  const eff = { wide: 0, wideLv: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0 };
+  const WIDE_MULT = [1, 1.5, 2, 2.5]; // WIDEを重ねて取ると3段階まで広がる // アイテム・毒の効果時間
   function dropItem(b) {
     // ボールが上限なら、増えるアイテムは出さない
     const pool = balls.length >= CFG.maxBalls ? ITEMS.filter(x => !x.mult) : ITEMS;
@@ -1932,11 +1941,12 @@
       return true;
     });
     for (const k of ['wide', 'power', 'poison', 'ghost']) if (eff[k] > 0) eff[k] = Math.max(0, eff[k] - dt);
+    if (eff.wide <= 0) eff.wideLv = 0;
   }
   function applyItem(it) {
-    if (it.id === 'wide') eff.wide = 15;
+    if (it.id === 'wide') { eff.wideLv = Math.min(3, eff.wideLv + 1); eff.wide = 15; } // 取るたびに一段広がり、時間も15秒に戻る
     if (it.id === 'power') eff.power = 12;
-    if (it.id === 'barrier') eff.barrier = 1;
+    if (it.id === 'barrier') eff.barrier = Math.min(99, eff.barrier + 1); // 取るたびに増える
     if (it.id === 'magnet') eff.magnet = 1;  // 次のミスまで
     if (it.id === 'ghost') eff.ghost = 6;    // ハズレ：6秒間パドルが見えない
     if (state === 'play' && (it.id === 'spin' || it.id === 'slow')) {
@@ -2697,10 +2707,10 @@
       ctx.fillRect(0, top - 3, W * g, 3);
     }
     const chips = [];
-    if (eff.wide > 0) chips.push(['WIDE', eff.wide, '#4dd8ff']);
+    if (eff.wide > 0) chips.push([`WIDE${eff.wideLv}`, eff.wide, '#4dd8ff']);
     if (eff.power > 0) chips.push(['POW', eff.power, '#ff4d6d']);
     if (eff.poison > 0) chips.push(['毒', eff.poison, '#7cff3a']);
-    if (eff.barrier > 0) chips.push(['BAR', 0, '#7df9ff']);
+    if (eff.barrier > 0) chips.push([`BAR×${eff.barrier}`, 0, '#7df9ff']);
     if (eff.magnet > 0) chips.push(['MAG', 0, '#b388ff']);
     if (eff.ghost > 0) chips.push(['透明', eff.ghost, '#9aa0b8']);
     if (balls.length > 1) chips.push([`●×${balls.length}`, 0, '#ffffff']);
