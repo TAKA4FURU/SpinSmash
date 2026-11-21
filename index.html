@@ -1464,6 +1464,20 @@
         osc('square', 2200, 2150, t, 0.14, 0.09, out); osc('square', 3310, 3250, t, 0.1, 0.06, out);
         nz(t, 0.03, 0.3, 'bandpass', 5200, 3, out);
       },
+      // 壁ゆらし：ゴゴッという低いうなり
+      shake() {
+        if (!ok('shake', 150)) return;
+        const t = now();
+        nz(t, 0.25, 0.5, 'lowpass', 400, 1, master, 120);
+        osc('sine', 70, 40, t, 0.22, 0.5, drive);
+      },
+      // ゆれた壁でボールが弾かれた：シュッ！
+      shakeHit() {
+        if (!ok('shakeHit', 60)) return;
+        const t = now();
+        osc('triangle', 500, 1400, t, 0.08, 0.25);
+        whoosh(t + 0.01, 1, 1.4, 0);
+      },
       zap() {
         if (!ok('zap', 80)) return;
         const t = now();
@@ -1853,6 +1867,7 @@
   let rankedRun = true;
 
   function newGame(startStage) {
+    askMotion();
     score = 0; lives = Math.round(CFG.startLives) || LIVES; bestRally = 0; scoreSaved = false;
     rankedRun = isDefaultPlay() && (startStage || 1) === 1;
     setTitle(false);
@@ -2001,6 +2016,48 @@
   // 当たりの強さ（0〜1）：面に垂直な速さで決める
   const powerOf = (dot) => Math.min(1, Math.abs(dot) / (H * 1.2));
 
+  // ---- 壁ゆらし（iPhoneを振ると周りの壁が揺れる）----
+  // 揺れている間に壁に当たったボールは、回転がかかって向きも少し変わる
+  const SHAKE_TIME = 0.35;
+  let shakeT = 0, shakeDir = 1, shakeId = 0, shakeCool = 0;
+  function triggerShake(dir) {
+    if (state !== 'play' || shakeCool > 0) return;
+    shakeT = SHAKE_TIME; shakeCool = 0.45; shakeId++;
+    shakeDir = dir || (Math.random() < 0.5 ? -1 : 1);
+    SFX.shake();
+  }
+  function shakeKick(nx, ny) {
+    if (shakeT <= 0 || ball.shk === shakeId) return;
+    ball.shk = shakeId; // 1回の揺れで1ボール1回だけ
+    const d = shakeDir, s = speedOf();
+    // 回転をかける
+    ball.spin += d * H * CFG.maxSpin * 0.35;
+    clampSpin();
+    // 向きを約20°ずらす（壁から離れる向きは保つ）
+    const a = -d * 0.35 * (ny ? 1 : nx), c = Math.cos(a), sn = Math.sin(a);
+    const vx = ball.vx * c - ball.vy * sn, vy = ball.vx * sn + ball.vy * c;
+    if (vx * nx + vy * ny > 0) { ball.vx = vx; ball.vy = vy; }
+    setSpeed(s);
+    keepVertical(false);
+    SFX.shakeHit();
+    if (ball === balls[0] || Math.random() < 0.1) addPopup(ball.x, ball.y + (ny ? 18 : 0), 'SHAKE!', '#7fdcff');
+  }
+  let motionAsked = false;
+  function askMotion() {
+    if (motionAsked) return; motionAsked = true;
+    try {
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        DeviceMotionEvent.requestPermission().catch(() => {});
+      }
+    } catch (e) {}
+  }
+  addEventListener('devicemotion', e => {
+    const a = e.acceleration;
+    if (!a || a.x == null) return;
+    const m = Math.hypot(a.x, a.y || 0, a.z || 0);
+    if (m > 13) triggerShake(Math.abs(a.x) > 3 ? Math.sign(a.x) : 0);
+  });
+
   function bounce(nx, ny, sound, row) {
     const s = speedOf();
     const dot = ball.vx * nx + ball.vy * ny;
@@ -2084,6 +2141,8 @@
   function update(dt) {
     updateBg(dt);
     if (state === 'title') return;
+    if (shakeT > 0) shakeT -= dt;
+    if (shakeCool > 0) shakeCool -= dt;
     updateFx(dt);
     if (state === 'stageClear') {
       stageTimer -= dt;
@@ -2250,9 +2309,9 @@
     recordTrail();
 
     // 壁
-    if (ball.x < ball.r)       { ball.x = ball.r;       bounce(1, 0); }
-    if (ball.x > W - ball.r)   { ball.x = W - ball.r;   bounce(-1, 0); }
-    if (ball.y < top + ball.r) { ball.y = top + ball.r; bounce(0, 1); ball.selfHit = false; }
+    if (ball.x < ball.r)       { ball.x = ball.r;       bounce(1, 0); shakeKick(1, 0); }
+    if (ball.x > W - ball.r)   { ball.x = W - ball.r;   bounce(-1, 0); shakeKick(-1, 0); }
+    if (ball.y < top + ball.r) { ball.y = top + ball.r; bounce(0, 1); ball.selfHit = false; shakeKick(0, 1); }
 
     // パドル
     const px = paddle.x - paddle.w / 2;
@@ -3277,6 +3336,16 @@
       ctx.fillStyle = p.color; ctx.fillText(p.text, p.x, p.y);
     }
     ctx.globalAlpha = 1;
+    // 壁ゆらし：揺れている間だけ壁の線を描いてくねらせる（画面全体は揺らさない）
+    if (shakeT > 0) {
+      const k = shakeT / SHAKE_TIME, amp = 5 * k * Math.max(0.3, CFG.fx), ph = (SHAKE_TIME - shakeT) * 60;
+      ctx.strokeStyle = `rgba(127,220,255,${0.85 * k})`; ctx.lineWidth = 3;
+      ctx.beginPath();
+      for (let y = H; y >= top; y -= 12) ctx.lineTo(2 + Math.sin(y * 0.05 + ph) * amp * shakeDir, y);
+      for (let x = 2; x <= W - 2; x += 12) ctx.lineTo(x, top + 2 + Math.sin(x * 0.05 + ph) * amp);
+      for (let y = top; y <= H; y += 12) ctx.lineTo(W - 2 + Math.sin(y * 0.05 + ph) * amp * shakeDir, y);
+      ctx.stroke();
+    }
     // フィーバー中は画面の縁が虹色に光る（点滅なし）
     if (fever > 0) {
       ctx.strokeStyle = `hsla(${(stageTime * 120) % 360},90%,65%,0.8)`;
