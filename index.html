@@ -370,6 +370,17 @@
         }
       } },
   ];
+  // ブロックの並び（1=普通 H=硬い I=アイテム P=毒 .=なし、行頭の > はその列が左右に動く）
+  const LAYOUTS = {"grass": ["1111111", "1111111", "11I1I11", "1111111", "1111111"],
+     "water": ["1111111", ">.11I11.", "1H111H1", ">..111..", "1111111"],
+     "fire": ["...H...", "..1I1..", ".11111.", "1111111", "1H1H1H1", "1111111"],
+     "electric": ["1.1.1.1", ">.1I1I1.", "1111111", ">..H1H..", "1.1.1.1", "1111111"],
+     "sky": [">11..11.", ">..1I1..", "1111111", ">.11.11.", "1H.1.H1", ">..111.."],
+     "rock": ["HH1H1HH", "1111111", "1HIHIH1", "1111111", "H11111H", "1111111"],
+     "ice": ["...1...", "..1I1..", ".11H11.", "11H1H11", ".11H11.", "..1I1..", "...1..."],
+     "poison": ["1H1H1H1", ">.1I1I1.", "1111111", "PPPPPPP", ">..PPP..", "PP1P1PP"],
+     "steel": ["HHHHHHH", ">.H1I1H.", "1H1H1H1", ">..HHH..", "H1H1H1H", "1111111"],
+     "bio": [">..111..", ">.11H11.", "11HIH11", ">.1HHH1.", "1111111", ">.1I1I1.", "..1.1.."]};
   // ステージ順（おまかせ）：だんだん手強い印象の属性へ
   const STAGE_ORDER = ['grass', 'water', 'fire', 'electric', 'sky', 'rock', 'ice', 'poison', 'steel', 'bio'];
   const themeOf = n => THEMES.find(t => t.key === STAGE_ORDER[(n - 1) % STAGES]);
@@ -626,6 +637,56 @@
         whoosh(1, 0.8);
         tone(90, 45, 0.05, 0.4, 0.45);
       },
+      // アイテム取得：ピロリン
+      item() {
+        if (!ok('item', 80)) return;
+        [1320, 1760, 2640].forEach((f, i) => tone(f, f, i * 0.05, 0.09, 0.18, 'square'));
+      },
+      // 1UP：ファンファーレ
+      oneUp() {
+        if (!ok('oneUp', 300)) return;
+        [1046, 1318, 1568, 2093, 1568, 2093].forEach((f, i) => tone(f, f, i * 0.07, 0.1, 0.2, 'square'));
+      },
+      // PERFECT：キラーン
+      perfect() {
+        if (!ok('perfect', 100)) return;
+        tone(2637, 2637, 0, 0.08, 0.22, 'triangle');
+        tone(3520, 3520, 0.06, 0.18, 0.2, 'triangle');
+        click(0.4, 6000, 0.01);
+      },
+      // 防御で弾かれた：カキン
+      clank() {
+        if (!ok('clank', 60)) return;
+        tone(2200, 2100, 0, 0.12, 0.2, 'square');
+        tone(3300, 3200, 0, 0.08, 0.12, 'triangle');
+      },
+      // 放電：バチッ
+      zap() {
+        if (!ok('zap', 80)) return;
+        click(0.6, 1500, 0.06);
+        tone(1800, 300, 0, 0.08, 0.15, 'sawtooth');
+      },
+      // 延焼：ボッ
+      burn() {
+        if (!ok('burn', 80)) return;
+        whoosh(0.5, 0.4);
+        tone(160, 60, 0, 0.15, 0.3);
+      },
+      // 毒：ぶくぶく
+      poisoned() {
+        if (!ok('poisoned', 300)) return;
+        [0, 0.06, 0.12].forEach(d => tone(300 + Math.random() * 200, 120, d, 0.08, 0.15, 'sine'));
+      },
+      // フィーバー開始・終了
+      feverStart() {
+        if (!ok('feverStart', 500)) return;
+        [523, 659, 784, 1046, 1318, 1568].forEach((f, i) => tone(f, f * 1.01, i * 0.06, 0.16, 0.2, 'square'));
+        whoosh(1, 1.2);
+      },
+      feverEnd() {
+        if (!ok('feverEnd', 500)) return;
+        tone(1046, 392, 0, 0.4, 0.15, 'square');
+      },
       // 減速：「ヒュゥン」と下がっていく音
       powerDown(amount) {
         if (!ok('powerDown', 80)) return;
@@ -758,16 +819,37 @@
     paddle.x = Math.min(Math.max(paddle.x, paddle.w / 2), W - paddle.w / 2);
   }
 
+  let rowAmp = [];
   function layoutBricks() {
     const gap = 3, side = 6;
     const bw = (W - side * 2 - gap * (COLS - 1)) / COLS;
     const bh = Math.max(12, H * 0.024);
     for (const b of bricks) {
-      b.x = side + b.c * (bw + gap);
+      b.baseX = side + b.c * (bw + gap);
+      b.x = b.baseX;
       b.y = top + 20 + b.r * (bh + gap);
       b.w = bw; b.h = bh;
     }
-    brickBottom = top + 20 + ROWS * (bh + gap);
+    // 動く列：その列の空きスペースぶんだけ左右に揺れる
+    rowAmp = [];
+    for (let r = 0; r < rowsInStage; r++) {
+      if (!movingRows[r]) { rowAmp[r] = 0; continue; }
+      const cs = bricks.filter(b => b.r === r).map(b => b.c);
+      if (!cs.length) { rowAmp[r] = 0; continue; }
+      const left = Math.min(...cs), right = COLS - 1 - Math.max(...cs);
+      rowAmp[r] = Math.min(left, right) * (bw + gap) + side * 0.5;
+    }
+    brickBottom = top + 20 + rowsInStage * (bh + gap);
+  }
+  // 動く列の位置を更新
+  let stageTime = 0;
+  function moveBricks(dt) {
+    stageTime += dt;
+    const sp = 0.7 + stage * 0.08;
+    for (const b of bricks) {
+      const a = rowAmp[b.r] || 0;
+      b.x = a ? b.baseX + Math.sin(stageTime * sp + b.r * 1.7) * a : b.baseX;
+    }
   }
 
   // ヒビの形（ブロック内の相対座標 0〜1）。HPが減るほど本数が増える
@@ -796,14 +878,32 @@
 
   // ステージが進むほどブロックが硬くなる（第10ステージで約2倍）
   const hpScaleOf = n => 1 + 0.11 * (n - 1);
+  // 段の深さ（0=一番奥 1=一番手前）からHPを決める（6段のときの HP_BY_ROW と同じ）
+  function hpAtDepth(f) {
+    const x = f * (HP_BY_ROW.length - 1), i = Math.min(Math.floor(x), HP_BY_ROW.length - 2);
+    return HP_BY_ROW[i] + (HP_BY_ROW[i + 1] - HP_BY_ROW[i]) * (x - i);
+  }
+  let rowsInStage = ROWS, movingRows = [];
   function makeBricks() {
     bricks = [];
     const theme = themeOf(stage), k = hpScaleOf(stage);
-    for (let r = 0; r < ROWS; r++)
+    const lay = LAYOUTS[theme.key];
+    rowsInStage = lay.length;
+    movingRows = lay.map(row => row.startsWith('>'));
+    lay.forEach((rowStr, r) => {
+      const row = rowStr.startsWith('>') ? rowStr.slice(1) : rowStr;
+      const depth = rowsInStage > 1 ? r / (rowsInStage - 1) : 1;
+      const colorIdx = Math.round(depth * (theme.blocks.length - 1));
       for (let c = 0; c < COLS; c++) {
-        const hp = Math.round(HP_BY_ROW[r] * k);
-        bricks.push({ r, c, alive: true, color: theme.blocks[r], hp, maxHp: hp, cracks: makeCracks(), hitT: 0 });
+        const t = row[c];
+        if (t === '.') continue;
+        let hp = hpAtDepth(depth) * k;
+        if (t === 'H') hp *= 2.5;
+        hp = Math.round(hp);
+        bricks.push({ r, c, type: t, alive: true, color: t === 'P' ? '#7cff3a' : theme.blocks[colorIdx],
+          hp, maxHp: hp, cracks: makeCracks(), hitT: 0, revived: false, reviveT: 0, lastHit: 0 });
       }
+    });
     layoutBricks();
   }
 
@@ -832,7 +932,9 @@
   // ステージ開始（ブロック・背景・ボールを用意して発射待ち）
   function loadStage(n) {
     stage = n;
-    particles = []; dmgTexts = [];
+    particles = []; dmgTexts = []; items = []; popups = []; zaps = []; swingHist = [];
+    eff.wide = 0; eff.power = 0; eff.poison = 0; eff.barrier = 0;
+    fever = 0; feverGauge = 0; stageTime = 0; windT = 0;
     makeBricks(); // 先にブロック（パドルの上限がブロック位置で決まるため）
     if (!paddle) paddle = { x: W / 2, vx: 0, prevX: W / 2, vy: 0, y: null };
     paddle.y = null; targetY = null;
@@ -962,7 +1064,8 @@
     if (!sound) SFX.wall(powerOf(dot));
     ball.vx -= 2 * dot * nx;
     ball.vy -= 2 * dot * ny;
-    friction(nx, ny, 0, CFG.wallGrip, CFG.wallKick);
+    // こおり：壁やブロックで回転が減らない（滑る）
+    friction(nx, ny, 0, themeOf(stage).key === 'ice' ? 0 : CFG.wallGrip, CFG.wallKick);
     setSpeed(s);
     keepVertical(ny < 0);
   }
@@ -1013,6 +1116,10 @@
 
   function updateFx(dt) {
     if (banner) { banner.life -= dt; if (banner.life <= 0) banner = null; }
+    for (const p of popups) { p.y -= H * 0.05 * dt; p.life -= dt; }
+    if (popups.length) popups = popups.filter(p => p.life > 0);
+    for (const z of zaps) z.life -= dt;
+    if (zaps.length) zaps = zaps.filter(z => z.life > 0);
     for (const t of dmgTexts) { t.y -= H * 0.06 * dt; t.life -= dt; }
     if (dmgTexts.length) dmgTexts = dmgTexts.filter(t => t.life > 0);
     for (const b of bricks) if (b.hitT > 0) b.hitT = Math.max(0, b.hitT - dt * 8);
@@ -1041,6 +1148,13 @@
       }
       return;
     }
+    moveBricks(dt);
+    gimmicks(dt);
+    updateItems(dt);
+    updateFever(dt);
+    // WIDE中はパドルが広がる
+    const wantW = W * CFG.paddleW * (eff.wide > 0 ? 1.5 : 1);
+    paddle.w += (wantW - paddle.w) * Math.min(1, dt * 10);
     paddle.x = Math.min(Math.max(targetX, paddle.w / 2), W - paddle.w / 2);
     const instVx = (paddle.x - paddle.prevX) / Math.max(dt, 1e-3);
     paddle.vx += (instVx - paddle.vx) * 0.5;
@@ -1050,6 +1164,7 @@
     else paddle.y = paddle.baseY;
     const instVy = (paddle.y - paddle.frameStartY) / Math.max(dt, 1e-3);
     paddle.vy += (instVy - paddle.vy) * 0.5;
+    recordSwing();
 
     if (state === 'ready') {
       ball.x = paddle.x;
@@ -1117,8 +1232,17 @@
         if (before < H * CFG.beamSpeed && after >= H * CFG.beamSpeed) SFX.beamOn();
       }
     }
+    // ジャストショット
+    if (isPerfect()) {
+      setSpeed(Math.min(speedOf() * 1.08, H * CFG.maxSpeed));
+      ball.spin = Math.max(-H * CFG.maxSpin, Math.min(H * CFG.maxSpin, ball.spin * 1.3));
+      score += 100 * stage;
+      addPopup(ball.x, paddle.y - 34, 'PERFECT!', '#fff27a');
+      SFX.perfect();
+    }
     rally++; chain = 0;
     bestRally = Math.max(bestRally, rally);
+    if (rally % 5 === 0) addPopup(W / 2, H * 0.55, `x${rallyMult().toFixed(1)}`, '#ffd23f');
     SFX.paddle(power, spinAmt, rally);
     if (braked) SFX.powerDown(braked);
     if (rally % 5 === 0) SFX.rallyUp(rally);
@@ -1129,7 +1253,8 @@
   function step(dt) {
     // 空中のカーブ
     const s = speedOf();
-    const a = CFG.curve * ball.spin;
+    const a = CFG.curve * ball.spin * (themeOf(stage).key === 'ice' ? 1.5 : 1); // こおり：よく曲がる
+    applyCurrents(dt);
     const vx0 = ball.vx, vy0 = ball.vy;
     ball.vx += (-vy0 / s) * a * dt;
     ball.vy += ( vx0 / s) * a * dt;
@@ -1182,36 +1307,29 @@
           const s2 = speedOf(); dx = -ball.vx / s2; dy = -ball.vy / s2; d = 1;
         }
         const nX = dx / d, nY = dy / d;
-        const dmg = Math.min(damageAt(speedOf()), b.hp);
         const power = powerOf(ball.vx * nX + ball.vy * nY);
-        b.hp -= dmg;
-        b.hitT = 1;
         ball.selfHit = false;
-        addDamageText(b, dmg, b.hp <= 0);
-        if (b.hp <= 0) {
-          // 倒した：跳ね返らずに貫通
-          b.alive = false;
-          score += b.maxHp;
-          chain++;
-          SFX.brick(b.r, power, chain, true);
-          spawnParticles(b, -ball.vx / speedOf(), -ball.vy / speedOf(), 1);
-          if (bricks.every(k => !k.alive)) {
-            // ステージクリア：残機ボーナス
-            state = 'stageClear'; stageTimer = 2.4; SFX.clear();
-            score += 500 * stage;
-            banner = { text: 'STAGE CLEAR!', sub: `ボーナス +${500 * stage}`, color: '#fff27a', life: 2.2 };
-            break;
-          }
-          continue; // 同じ瞬間に触れている他のブロックも判定
-        }
+        const raw = fever > 0 ? 99999 : ballDamage();
+        if (themeOf(stage).key === 'poison' && b.type === 'P') { eff.poison = 5; SFX.poisoned(); }
+        const killed = damageBrick(b, raw, 'ball', power);
+        if (state !== 'play') break;
+        if (killed) continue; // 倒した：跳ね返らずに貫通
         // 倒せなかった：削って跳ね返る
         ball.x = nx + nX * ball.r;
         ball.y = ny + nY * ball.r;
         bounce(nX, nY, 'brickHit', b.r);
-        SFX.brickHit(b.r, power, 1 - b.hp / b.maxHp);
         spawnParticles(b, nX, nY, 0.3);
         break;
       }
+    }
+
+    // 下：バリアかフィーバー中は跳ね返る
+    const floorY = H - safeBottom * 0.35;
+    if (ball.vy > 0 && ball.y + ball.r >= floorY && (eff.barrier > 0 || fever > 0)) {
+      ball.y = floorY - ball.r;
+      ball.vy = -Math.abs(ball.vy);
+      if (fever <= 0) { eff.barrier = 0; addPopup(ball.x, floorY - 20, 'BARRIER!', '#7df9ff'); }
+      SFX.wall(1);
     }
 
     // 落下
@@ -1220,9 +1338,199 @@
       // ミス（自分で下へ打ち込んだ自爆も同じ）：ドカーン＋破片
       SFX.selfDestruct();
       explode(ball.x, H - 4);
+      feverGauge = 0;
       if (lives <= 0) { state = 'over'; saveScore(); }
       else resetBall();
     }
+  }
+
+  // ---- ダメージ・ギミック ----
+  // 今のボールのダメージ（POWで2倍、毒で半分）
+  function ballDamage() {
+    let d = damageAt(speedOf());
+    if (eff.power > 0) d *= 2;
+    if (eff.poison > 0) d *= 0.5;
+    return Math.max(1, Math.round(d));
+  }
+  // 属性による防御（いわ・はがね）
+  function armorOf() {
+    const k = themeOf(stage).key;
+    return k === 'rock' ? 3 : k === 'steel' ? 8 : 0;
+  }
+  const rallyMult = () => Math.min(4, 1 + Math.floor(rally / 5) * 0.5);
+
+  // ブロックにダメージ。倒したら true
+  function damageBrick(b, raw, source, power) {
+    if (!b.alive) return false;
+    const dmg = Math.min(Math.max(0, raw - (fever > 0 ? 0 : armorOf())), b.hp);
+    b.hitT = 1;
+    b.lastHit = stageTime;
+    if (dmg <= 0) {
+      addDamageText(b, 0, false);
+      if (source === 'ball') SFX.clank();
+      return false;
+    }
+    b.hp -= dmg;
+    addDamageText(b, dmg, b.hp <= 0);
+    if (b.hp > 0) {
+      if (source === 'ball') SFX.brickHit(b.r, power || 0.5, 1 - b.hp / b.maxHp);
+      if (source === 'ball' && themeOf(stage).key === 'electric') zap(b, dmg);
+      return false;
+    }
+    // 倒した
+    b.alive = false;
+    chain++;
+    score += Math.round(b.maxHp * rallyMult() * (fever > 0 ? 2 : 1));
+    SFX.brick(b.r, power || 0.6, chain, true);
+    const s2 = speedOf() || 1;
+    spawnParticles(b, -ball.vx / s2, -ball.vy / s2, 1);
+    // アイテム：★ブロックは必ず、他は7%
+    if (b.type === 'I' || Math.random() < 0.07) dropItem(b);
+    const key = themeOf(stage).key;
+    if (key === 'bio' && !b.revived && Math.random() < 0.35) { b.reviveT = 7; }
+    if (key === 'fire' && source !== 'fire') burn(b);
+    if (key === 'electric' && source === 'ball') zap(b, b.maxHp * 0.5);
+    if (bricks.every(k => !k.alive)) stageClear();
+    return true;
+  }
+
+  function stageClear() {
+    if (state !== 'play') return;
+    state = 'stageClear'; stageTimer = 2.4; SFX.clear();
+    for (const k of bricks) k.reviveT = 0;
+    score += 500 * stage;
+    banner = { text: 'STAGE CLEAR!', sub: `ボーナス +${500 * stage}`, color: '#fff27a', life: 2.2 };
+  }
+
+  // ほのお：倒したブロックの周り8マスに延焼ダメージ
+  function burn(b) {
+    SFX.burn();
+    for (const n of bricks) {
+      if (!n.alive || n === b) continue;
+      if (Math.abs(n.r - b.r) <= 1 && Math.abs(n.c - b.c) <= 1) {
+        damageBrick(n, Math.round(n.maxHp * 0.35), 'fire');
+        if (state !== 'play') return;
+      }
+    }
+  }
+
+  // でんき：他のブロック2個に放電
+  let zaps = [];
+  function zap(from, amount) {
+    const targets = bricks.filter(k => k.alive && k !== from);
+    for (let i = 0; i < 2 && targets.length; i++) {
+      const t = targets.splice(Math.random() * targets.length | 0, 1)[0];
+      zaps.push({ x0: from.x + from.w / 2, y0: from.y + from.h / 2, x1: t.x + t.w / 2, y1: t.y + t.h / 2, life: 0.18 });
+      damageBrick(t, Math.round(amount * 0.5), 'zap');
+      if (state !== 'play') return;
+    }
+    SFX.zap();
+  }
+
+  // ---- アイテム ----
+  const ITEMS = [
+    { id: 'wide',    label: 'WIDE',    color: '#4dd8ff', w: 22 },
+    { id: 'power',   label: 'POW',     color: '#ff4d6d', w: 18 },
+    { id: 'spin',    label: 'SPIN',    color: '#c77dff', w: 18 },
+    { id: 'slow',    label: 'SLOW',    color: '#7cff8a', w: 14 },
+    { id: 'barrier', label: 'BARRIER', color: '#7df9ff', w: 18 },
+    { id: 'oneup',   label: '1UP',     color: '#ffd23f', w: 10 },
+  ];
+  let items = [];
+  const eff = { wide: 0, power: 0, poison: 0, barrier: 0 }; // アイテム・毒の効果時間
+  function dropItem(b) {
+    let r = Math.random() * ITEMS.reduce((a, it) => a + it.w, 0), it = ITEMS[0];
+    for (const x of ITEMS) { r -= x.w; if (r <= 0) { it = x; break; } }
+    items.push({ ...it, x: b.x + b.w / 2, y: b.y + b.h / 2, vy: H * 0.22 });
+  }
+  function updateItems(dt) {
+    for (const it of items) it.y += it.vy * dt;
+    const pw = paddle.w, ph = paddle.h;
+    items = items.filter(it => {
+      if (it.y > H + 20) return false;
+      const iw = W * 0.13, ih = 16;
+      if (Math.abs(it.x - paddle.x) < (pw + iw) / 2 && Math.abs(it.y - (paddle.y + ph / 2)) < (ph + ih) / 2) {
+        applyItem(it);
+        return false;
+      }
+      return true;
+    });
+    for (const k of ['wide', 'power', 'poison']) if (eff[k] > 0) eff[k] = Math.max(0, eff[k] - dt);
+  }
+  function applyItem(it) {
+    const s0 = speedOf();
+    if (it.id === 'wide') eff.wide = 15;
+    if (it.id === 'power') eff.power = 12;
+    if (it.id === 'barrier') eff.barrier = 1;
+    if (it.id === 'spin' && state === 'play') {
+      ball.spin = (Math.sign(ball.spin) || 1) * H * CFG.maxSpin;
+      setSpeed(Math.min(s0 * 1.15, H * CFG.maxSpeed));
+    }
+    if (it.id === 'slow' && state === 'play') setSpeed(Math.max(H * CFG.speed, s0 * 0.75));
+    if (it.id === 'oneup') { lives = Math.min(5, lives + 1); SFX.oneUp(); }
+    else SFX.item();
+    addPopup(it.x, paddle.y - 24, it.label === '1UP' ? '1UP!' : it.label, it.color);
+    score += 50;
+  }
+
+  // ---- 属性ギミック（毎フレーム） ----
+  let windT = 0, windDir = 1, flowDir = 1;
+  function gimmicks(dt) {
+    const key = themeOf(stage).key;
+    // くさ・せいぶつ：削れたブロックが回復（最後に当てて1秒後から）
+    const heal = key === 'grass' ? 0.015 : key === 'bio' ? 0.03 : 0;
+    for (const b of bricks) {
+      if (heal && b.alive && b.hp < b.maxHp && stageTime - b.lastHit > 1) b.hp = Math.min(b.maxHp, b.hp + b.maxHp * heal * dt);
+      // せいぶつ：倒したブロックが時々復活
+      if (!b.alive && b.reviveT > 0) {
+        b.reviveT -= dt;
+        if (b.reviveT <= 0) { b.alive = true; b.revived = true; b.hp = Math.round(b.maxHp * 0.5); b.hitT = 1; addPopup(b.x + b.w / 2, b.y, '復活', '#ff6f91'); }
+      }
+    }
+    // みず：画面中央の水流（5秒ごとに向きが変わる）／ひこう：時々横風
+    windT += dt;
+    if (key === 'water') flowDir = Math.floor(windT / 5) % 2 ? -1 : 1;
+    if (key === 'sky') windDir = Math.floor(windT / 7) % 2 ? -1 : 1;
+  }
+  const windOn = () => themeOf(stage).key === 'sky' && (windT % 7) > 5;   // 7秒ごとに2秒間の突風
+  const inFlow = y => themeOf(stage).key === 'water' && y > H * 0.45 && y < H * 0.6;
+  function applyCurrents(dt) {
+    if (inFlow(ball.y)) ball.vx += flowDir * H * 0.7 * dt;
+    if (windOn()) ball.vx += windDir * H * 0.9 * dt;
+  }
+
+  // ---- ジャストショット・フィーバー ----
+  let swingHist = [];      // パドルの速さの履歴 [時刻, 速さ]
+  let fever = 0, feverGauge = 0;
+  function recordSwing() {
+    const v = Math.hypot(paddle.vx, paddle.vy);
+    swingHist.push([stageTime, v]);
+    while (swingHist.length && stageTime - swingHist[0][0] > 0.4) swingHist.shift();
+  }
+  // 止めていたパドルを、当たる直前（0.25秒以内）に振り始めて打ったか
+  function isPerfect() {
+    const now = Math.hypot(paddle.vx, paddle.vy);
+    if (now < H * 1.0) return false;
+    const before = swingHist.find(([t]) => stageTime - t <= 0.3 && stageTime - t >= 0.18);
+    return !!before && before[1] < H * 0.25;
+  }
+  function updateFever(dt) {
+    if (fever > 0) { fever = Math.max(0, fever - dt); if (fever === 0) SFX.feverEnd(); return; }
+    if (state !== 'play') return;
+    const near = speedOf() >= H * CFG.maxSpeed * 0.9;
+    feverGauge = Math.max(0, Math.min(1, feverGauge + (near ? dt / 3 : -dt / 6)));
+    if (feverGauge >= 1) {
+      fever = 8; feverGauge = 0;
+      SFX.feverStart();
+      banner = { text: 'FEVER!!', sub: '8秒間 一撃・落ちない・スコア2倍', color: '#ff7ae0', life: 1.8 };
+    }
+  }
+
+  // ちょっとした文字表示（アイテム名・PERFECTなど）
+  let popups = [];
+  function addPopup(x, y, text, color) {
+    popups.push({ x, y, text, color, life: 0.9 });
+    if (popups.length > 12) popups.shift();
   }
 
   // ---- 描画 ----
@@ -1381,6 +1689,10 @@
   }
 
   function drawBall() {
+    if (eff.power > 0 || eff.poison > 0) {
+      ctx.fillStyle = eff.poison > 0 ? 'rgba(124,255,58,0.35)' : 'rgba(255,77,109,0.35)';
+      ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r * 1.9, 0, Math.PI * 2); ctx.fill();
+    }
     const { x, y, r, rot } = ball;
     ctx.fillStyle = BALL_COLOR_A;
     ctx.beginPath();
@@ -1422,6 +1734,117 @@
     ctx.fillText('回転をかけて、加速して、撃ち抜け', cx, by + r * 3);
   }
 
+  // みずの水流・ひこうの横風の目印
+  function drawCurrents() {
+    const key = themeOf(stage).key, t = stageTime;
+    if (key === 'water') {
+      const y0 = H * 0.45, y1 = H * 0.6;
+      ctx.fillStyle = 'rgba(120,200,255,0.07)';
+      ctx.fillRect(0, y0, W, y1 - y0);
+      ctx.fillStyle = 'rgba(160,220,255,0.35)';
+      ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (let i = 0; i < 8; i++) {
+        const x = ((i / 8 + flowDir * t * 0.15) % 1 + 1) % 1 * W;
+        ctx.fillText(flowDir > 0 ? '›' : '‹', x, y0 + (y1 - y0) * (0.3 + 0.4 * (i % 2)));
+      }
+    }
+    if (key === 'sky' && windOn()) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i < 12; i++) {
+        const y = (i / 12) * H + 30, x = ((i * 0.37 + windDir * t * 1.2) % 1 + 1) % 1 * W;
+        ctx.moveTo(x, y); ctx.lineTo(x + windDir * 50, y + 6);
+      }
+      ctx.stroke();
+    }
+  }
+
+  // ブロックの種類ごとの見た目
+  function decorateBrick(b) {
+    if (b.type === 'H') {
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 2;
+      roundRect(b.x + 1, b.y + 1, b.w - 2, b.h - 2, 3); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      for (const [rx, ry] of [[4, 4], [b.w - 4, 4], [4, b.h - 4], [b.w - 4, b.h - 4]]) { ctx.beginPath(); ctx.arc(b.x + rx, b.y + ry, 1.3, 0, Math.PI * 2); ctx.fill(); }
+    } else if (b.type === 'I') {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `bold ${Math.round(b.h * 0.8)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('★', b.x + b.w / 2, b.y + b.h * 0.45);
+    } else if (b.type === 'P') {
+      ctx.fillStyle = 'rgba(40,90,20,0.6)';
+      for (const [rx, ry, rr] of [[0.25, 0.4, 0.18], [0.55, 0.55, 0.13], [0.78, 0.35, 0.1]]) { ctx.beginPath(); ctx.arc(b.x + b.w * rx, b.y + b.h * ry, b.h * rr, 0, Math.PI * 2); ctx.fill(); }
+    }
+  }
+
+  // アイテム・放電・文字・バリア・フィーバー・HUDの追加表示
+  function drawExtras() {
+    // 落ちてくるアイテム
+    const iw = W * 0.13, ih = 16;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const it of items) {
+      ctx.fillStyle = it.color;
+      roundRect(it.x - iw / 2, it.y - ih / 2, iw, ih, ih / 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = '#0b1020';
+      ctx.font = `900 ${it.label.length > 4 ? 8 : 10}px -apple-system, sans-serif`;
+      ctx.fillText(it.label, it.x, it.y + 0.5);
+    }
+    // 放電
+    if (zaps.length) {
+      ctx.strokeStyle = 'rgba(255,240,120,0.9)'; ctx.lineWidth = 2;
+      for (const z of zaps) {
+        ctx.beginPath(); ctx.moveTo(z.x0, z.y0);
+        for (let i = 1; i < 6; i++) { const f = i / 6; ctx.lineTo(z.x0 + (z.x1 - z.x0) * f + (Math.random() - 0.5) * 14, z.y0 + (z.y1 - z.y0) * f + (Math.random() - 0.5) * 14); }
+        ctx.lineTo(z.x1, z.y1); ctx.stroke();
+      }
+    }
+    // バリア（フィーバー中も表示）
+    if (eff.barrier > 0 || fever > 0) {
+      const y = H - safeBottom * 0.35;
+      ctx.strokeStyle = fever > 0 ? `hsl(${(stageTime * 200) % 360},90%,70%)` : 'rgba(125,249,255,0.85)';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(6, y); ctx.lineTo(W - 6, y); ctx.stroke();
+    }
+    // 文字（アイテム名・PERFECT・倍率など）
+    for (const p of popups) {
+      ctx.globalAlpha = Math.min(1, p.life / 0.4);
+      ctx.font = '900 18px -apple-system, "Hiragino Sans", sans-serif';
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillText(p.text, p.x + 1, p.y + 2);
+      ctx.fillStyle = p.color; ctx.fillText(p.text, p.x, p.y);
+    }
+    ctx.globalAlpha = 1;
+    // フィーバー中は画面の縁が虹色に光る（点滅なし）
+    if (fever > 0) {
+      ctx.strokeStyle = `hsla(${(stageTime * 120) % 360},90%,65%,0.8)`;
+      ctx.lineWidth = 6;
+      ctx.strokeRect(3, top + 3, W - 6, H - top - 6);
+    }
+    // HUD：ラリー倍率・フィーバーゲージ・効果中のアイテム
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    const m = rallyMult();
+    if (m > 1) {
+      ctx.font = 'bold 13px -apple-system, sans-serif';
+      ctx.fillStyle = '#ffd23f';
+      ctx.fillText(`x${m.toFixed(1)}`, 14 + ctx.measureText('SCORE ' + score).width * 1.25, top / 2 + 12);
+    }
+    const g = fever > 0 ? fever / 8 : feverGauge;
+    if (g > 0) {
+      ctx.fillStyle = fever > 0 ? `hsl(${(stageTime * 200) % 360},90%,65%)` : '#ff7ae0';
+      ctx.fillRect(0, top - 3, W * g, 3);
+    }
+    const chips = [];
+    if (eff.wide > 0) chips.push(['WIDE', eff.wide, '#4dd8ff']);
+    if (eff.power > 0) chips.push(['POW', eff.power, '#ff4d6d']);
+    if (eff.poison > 0) chips.push(['毒', eff.poison, '#7cff3a']);
+    if (eff.barrier > 0) chips.push(['BAR', 0, '#7df9ff']);
+    ctx.font = 'bold 10px -apple-system, sans-serif';
+    chips.forEach(([label, t, col], i) => {
+      const x = 10 + i * 46, y = top + 6;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; roundRect(x, y, 42, 12, 6); ctx.fill();
+      ctx.fillStyle = col; ctx.fillText(t ? `${label} ${Math.ceil(t)}` : label, x + 5, y + 6.5);
+    });
+  }
+
   function draw() {
     drawBg();
     if (state === 'title') { drawTitle(); return; }
@@ -1446,6 +1869,7 @@
     const fx = CFG.fx;
 
     drawRally();
+    drawCurrents();
 
     for (const b of bricks) {
       if (!b.alive) continue;
@@ -1453,6 +1877,8 @@
       ctx.fillStyle = b.color;
       roundRect(b.x, b.y, b.w, b.h, 3);
       ctx.fill();
+      decorateBrick(b);
+      roundRect(b.x, b.y, b.w, b.h, 3); // 下の暗転処理用にパスを戻す
       // 削れるほど暗く
       if (ratio < 1) {
         ctx.fillStyle = `rgba(0,0,0,${0.45 * (1 - ratio)})`;
@@ -1541,6 +1967,8 @@
     if (state !== 'over' && state !== 'allClear') { drawTrail(); drawBall(); }
 
 
+
+    drawExtras();
 
     let msg = null, sub = null;
     if (paused)                 { msg = 'PAUSE'; sub = panelOpen ? '⚙ で閉じると再開' : '右上の ▶ で再開'; }
