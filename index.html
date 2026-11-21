@@ -494,6 +494,7 @@
     beamSpeed:  1.0,   // ビームが出始める速度（画面高さ/秒）
     dmgScale:   1.0,   // ダメージ倍率
     bossAt:     3,     // 残りブロックがこの割合(%)以下になったらボス登場（ブロックは残る）
+    bossMinSec: 4,     // ボスを倒すのに最低かかる秒数（1秒に受けるダメージを 最大HP÷この秒数 までに制限）
     shotExtra:  1,     // ボスが1回に撃つ弾の追加数
     shotInterval: 0.8, // ボスが弾を撃つ間隔（倍率。小さいほど頻繁）
     // 試験機能：パドルの上下移動
@@ -547,6 +548,7 @@
     { key: 'itemBoost',  label: '残りが減った時の出現率（最大倍率）', min: 1, max: 10, step: 0.5 },
     { group: 'ボス' },
     { key: 'bossAt',     label: 'ボス登場（残りブロック%）', min: 0, max: 20, step: 1 },
+    { key: 'bossMinSec', label: 'ボスの最短撃破時間（秒）', min: 1, max: 10, step: 0.5 },
     { key: 'shotExtra',  label: '敵弾の追加数', min: 0, max: 5, step: 1 },
     { key: 'shotInterval', label: '敵弾の間隔（倍率）', min: 0.3, max: 1.5, step: 0.05 },
     { group: '上下移動（試験）' },
@@ -2133,6 +2135,9 @@
     b.t += dt;
     b.hitT = Math.max(0, b.hitT - dt * 5);
     b.inv = Math.max(0, b.inv - dt);
+    // 秒間ダメージ上限：1秒あたり 最大HP÷最短秒数 だけ「受けられる量」がたまる（最大1秒分）
+    if (b.enter <= 0) { const cap = b.maxHp / Math.max(1, CFG.bossMinSec); b.budget = Math.min(cap, (b.budget || 0) + cap * dt); }
+    b.maxT = Math.max(0, (b.maxT || 0) - dt);
     if (b.enter > 0) { // 上から降りてくる
       b.enter = Math.max(0, b.enter - dt * 0.6);
       b.y = b.baseY - b.enter * (b.h + b.baseY);
@@ -2218,8 +2223,15 @@
     b.invHits = 0;
     b.inv = 0.35;
     const raw = fever > 0 ? Math.max(150, ballDamage()) : ballDamage();
-    const dmg = Math.ceil(Math.min(b.hp, Math.max(0, raw - armorOf())));
+    const want = Math.ceil(Math.min(b.hp, Math.max(0, raw - armorOf())));
+    // 秒間ダメージ上限に達していたら、受けられる分だけ（ボールが多くても最短秒数はかかる）
+    const dmg = Math.min(want, Math.floor(b.budget || 0));
     b.hitT = 1;
+    if (want > dmg) {
+      if (b.maxT <= 0) { addPopup(b.x + (Math.random() - 0.5) * b.w * 0.6, b.y + b.h * 0.6, 'MAX!', '#ff4d6d'); b.maxT = 0.25; }
+      if (dmg <= 0) { SFX.bossHit(power); return; }
+    }
+    b.budget -= dmg;
     dmgTexts.push({ x: ball.x, y: ball.y - 10, text: dmg > 0 ? `${dmg}` : '0', kill: false, life: 0.7 });
     if (dmg <= 0) { SFX.clank(); return; }
     b.hp -= dmg;
