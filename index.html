@@ -37,6 +37,7 @@
   #optUI { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
   .rankBox.optBox { text-align: left; }
   .optBox h2 { text-align: center; margin-bottom: 14px; }
+  .optHead { font-size: 11px; color: #9aa6d6; letter-spacing: .05em; margin: 4px 0 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px; }
   .optRow { display: block; font-size: 14px; font-weight: bold; margin-bottom: 16px; }
   .optRow span { color: #4dd8ff; float: right; font-variant-numeric: tabular-nums; }
   .optRow input[type=range] { display: block; width: 100%; margin-top: 10px; accent-color: #4dd8ff; touch-action: pan-x; }
@@ -167,6 +168,13 @@
       </label>
       <label class="optRow">効果音の音量 <span id="optSeVal"></span>
         <input id="optSe" type="range" min="0" max="1" step="0.05">
+      </label>
+      <div class="optHead">演出</div>
+      <label class="optRow">演出の強さ <span id="optFxVal"></span>
+        <input id="optFx" type="range" min="0" max="2" step="0.1">
+      </label>
+      <label class="optRow">背景スクロール速度 <span id="optBgVal"></span>
+        <input id="optBg" type="range" min="0" max="20" step="0.5">
       </label>
       <button id="optClose">とじる</button>
     </div>
@@ -3234,12 +3242,24 @@
     const optName = document.getElementById('optName'), optBgm = document.getElementById('optBgm'), optSe = document.getElementById('optSe');
     const bgmVal = document.getElementById('optBgmVal'), seVal = document.getElementById('optSeVal');
     const pct = v => Math.round(v * 100) + '%';
-    const showVals = () => { bgmVal.textContent = pct(CFG.bgmVol); seVal.textContent = pct(CFG.volume); };
+    const optFx = document.getElementById('optFx'), optBg = document.getElementById('optBg');
+    const showVals = () => {
+      bgmVal.textContent = pct(CFG.bgmVol); seVal.textContent = pct(CFG.volume);
+      document.getElementById('optFxVal').textContent = CFG.fx > 0 ? `×${CFG.fx.toFixed(1)}` : 'オフ';
+      document.getElementById('optBgVal').textContent = CFG.bgSpeed > 0 ? `×${CFG.bgSpeed}` : '止める';
+    };
+    // 演出：パドルの光・ビーム・破片の強さ／背景の流れる速さ（⚙パネルと連動）
+    for (const [el, key] of [[optFx, 'fx'], [optBg, 'bgSpeed']]) {
+      el.addEventListener('input', () => {
+        applyChange(key, parseFloat(el.value)); showVals(); saveCfg();
+        if (inputs[key]) { inputs[key].input.value = CFG[key]; inputs[key].show(); }
+      });
+    }
     let seTestT = 0;
     document.getElementById('optBtn').addEventListener('click', () => {
       SFX.init();
       try { optName.value = localStorage.getItem('spinsmash-name') || ''; } catch (e) {}
-      optBgm.value = CFG.bgmVol; optSe.value = CFG.volume; showVals();
+      optBgm.value = CFG.bgmVol; optSe.value = CFG.volume; optFx.value = CFG.fx; optBg.value = CFG.bgSpeed; showVals();
       optUI.classList.remove('hidden');
     });
     optBgm.addEventListener('input', () => {
