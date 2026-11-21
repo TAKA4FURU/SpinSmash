@@ -422,6 +422,7 @@
     minVert:    0.3,   // 縦方向の最小比（横に寝すぎ防止）
     // 音
     volume:     0.7,   // 効果音の音量
+    bgmVol:     0.45,  // BGMの音量
     muted:      false, // ミュート
     // 演出
     fx:         1.0,   // パドルの光・ビーム・破片の強さ
@@ -455,6 +456,7 @@
     { key: 'minVert',    label: '最小縦角度',   min: 0.1, max: 0.6, step: 0.02 },
     { group: '音' },
     { key: 'volume',     label: '音量',         min: 0, max: 1,   step: 0.05 },
+    { key: 'bgmVol',     label: 'BGM音量',      min: 0, max: 1,   step: 0.05 },
     { group: '演出' },
     { key: 'fx',         label: '演出の強さ',   min: 0, max: 2,   step: 0.1 },
     { key: 'bgSpeed',    label: '背景スクロール速度', min: 0, max: 20, step: 0.5 },
@@ -464,6 +466,183 @@
   const SFX = (() => {
     let ac = null, master = null, noise = null;
     const lastPlay = {};
+
+    // ================= BGM（8bit風チップチューン） =================
+    // 矩形波(デューティ比12.5/25/50%)・三角波・ノイズで演奏。曲はコード進行と旋律ルールから組み立てる
+    const Music = (() => {
+      let bus = null, waves = {}, song = null, songId = null, step = 0, nextT = 0, timer = null;
+      let fever = false, paused = false, pendingId = null;
+      const SCALES = {
+        major: [0, 2, 4, 5, 7, 9, 11], minor: [0, 2, 3, 5, 7, 8, 10], dorian: [0, 2, 3, 5, 7, 9, 10],
+        mixolydian: [0, 2, 4, 5, 7, 9, 10], phrygian: [0, 1, 3, 5, 7, 8, 10], harmonic: [0, 2, 3, 5, 7, 8, 11],
+        lydian: [0, 2, 4, 6, 7, 9, 11],
+      };
+      const DRUMS = { // K=キック S=スネア H=ハイハット（16分音符×16）
+        four:  { K: 'x...x...x...x...', S: '....x.......x...', H: '..x...x...x...x.' },
+        rock:  { K: 'x.....x.x.....x.', S: '....x.......x...', H: 'x.x.x.x.x.x.x.x.' },
+        half:  { K: 'x.........x.....', S: '........x.......', H: 'x...x...x...x...' },
+        march: { K: 'x...x...x...x...', S: '..x...x.x.x...x.', H: 'x.x.x.x.x.x.x.x.' },
+      };
+      // root=基準音(MIDI) prog=8小節のコード(音階の度数) lead=旋律の矩形波デューティ bass=ベースの刻み方
+      const SONGS = {
+        title:  { root: 60, mode: 'major',      bpm: 140, prog: [1, 5, 6, 4, 1, 5, 4, 5], lead: 0.25,  bass: 'oct',   drums: 'four',  arp: true,  seed: 11 },
+        s1:     { root: 55, mode: 'major',      bpm: 150, prog: [1, 4, 5, 1, 6, 4, 5, 5], lead: 0.25,  bass: 'oct',   drums: 'four',  arp: false, seed: 21 },
+        s2:     { root: 62, mode: 'lydian',     bpm: 138, prog: [1, 2, 1, 2, 6, 5, 4, 5], lead: 0.125, bass: 'walk',  drums: 'half',  arp: true,  seed: 32 },
+        s3:     { root: 57, mode: 'minor',      bpm: 165, prog: [1, 6, 7, 1, 1, 6, 4, 5], lead: 0.5,   bass: 'drive', drums: 'rock',  arp: false, seed: 43 },
+        s4:     { root: 52, mode: 'mixolydian', bpm: 170, prog: [1, 7, 4, 1, 1, 7, 4, 5], lead: 0.25,  bass: 'oct',   drums: 'four',  arp: true,  seed: 54 },
+        s5:     { root: 53, mode: 'major',      bpm: 156, prog: [1, 3, 4, 5, 1, 3, 4, 5], lead: 0.125, bass: 'walk',  drums: 'four',  arp: false, seed: 65 },
+        s6:     { root: 50, mode: 'dorian',     bpm: 142, prog: [1, 4, 1, 4, 7, 4, 5, 1], lead: 0.5,   bass: 'drive', drums: 'rock',  arp: false, seed: 76 },
+        s7:     { root: 59, mode: 'minor',      bpm: 150, prog: [1, 6, 3, 7, 1, 6, 4, 5], lead: 0.125, bass: 'oct',   drums: 'half',  arp: true,  seed: 87 },
+        s8:     { root: 61, mode: 'phrygian',   bpm: 138, prog: [1, 2, 1, 2, 7, 6, 2, 1], lead: 0.25,  bass: 'walk',  drums: 'half',  arp: false, seed: 98 },
+        s9:     { root: 52, mode: 'minor',      bpm: 165, prog: [1, 1, 6, 7, 1, 1, 4, 5], lead: 0.5,   bass: 'drive', drums: 'march', arp: false, seed: 109 },
+        s10:    { root: 54, mode: 'harmonic',   bpm: 160, prog: [1, 6, 4, 5, 1, 6, 2, 5], lead: 0.25,  bass: 'drive', drums: 'rock',  arp: true,  seed: 120 },
+        boss:   { root: 48, mode: 'minor',      bpm: 176, prog: [1, 1, 6, 6, 4, 4, 5, 5], lead: 0.5,   bass: 'drive', drums: 'rock',  arp: true,  seed: 131 },
+        last:   { root: 58, mode: 'harmonic',   bpm: 182, prog: [1, 6, 4, 5, 1, 6, 7, 5], lead: 0.25,  bass: 'drive', drums: 'four',  arp: true,  seed: 142 },
+      };
+      const JINGLES = { // [MIDI, 16分音符の長さ]
+        clear:    { bpm: 150, lead: [[72, 2], [76, 2], [79, 2], [84, 6], [83, 2], [84, 10]], bass: [[48, 8], [55, 8], [48, 8]] },
+        over:     { bpm: 100, lead: [[67, 4], [66, 4], [65, 4], [64, 6], [0, 2], [60, 12]], bass: [[43, 8], [41, 8], [36, 16]] },
+        allclear: { bpm: 140, lead: [[72, 2], [72, 2], [72, 2], [72, 6], [68, 6], [70, 6], [72, 4], [70, 2], [72, 16]],
+                    bass: [[48, 12], [44, 6], [46, 6], [48, 24]] },
+      };
+
+      const freq = m => 440 * Math.pow(2, (m - 69) / 12);
+      function setup() {
+        bus = ac.createGain(); bus.gain.value = 0; bus.connect(master);
+        setVol();
+        for (const d of [0.125, 0.25, 0.5]) { // 矩形波（パルス波）の音色を作る
+          const n = 40, re = new Float32Array(n), im = new Float32Array(n);
+          for (let k = 1; k < n; k++) re[k] = 2 / (k * Math.PI) * Math.sin(k * Math.PI * d);
+          waves[d] = ac.createPeriodicWave(re, im);
+        }
+        if (pendingId) { const id = pendingId; pendingId = null; play(id); }
+      }
+      function setVol() { if (bus) bus.gain.value = paused ? 0 : CFG.bgmVol; }
+
+      function note(wave, m, t, dur, vol) {
+        if (!m) return;
+        const o = ac.createOscillator();
+        if (wave === 'tri') o.type = 'triangle'; else o.setPeriodicWave(waves[wave]);
+        o.frequency.value = freq(m);
+        const g = ac.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(vol, t + 0.006);
+        g.gain.linearRampToValueAtTime(vol * 0.7, t + Math.min(0.08, dur * 0.5));
+        g.gain.linearRampToValueAtTime(0.0001, t + dur);
+        o.connect(g); g.connect(bus);
+        o.start(t); o.stop(t + dur + 0.02);
+      }
+      function drum(kind, t, accent) {
+        if (kind === 'K') {
+          const o = ac.createOscillator(), g = ac.createGain();
+          o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.12);
+          g.gain.setValueAtTime(0.55, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+          o.connect(g); g.connect(bus); o.start(t); o.stop(t + 0.16);
+          return;
+        }
+        const n = ac.createBufferSource(); n.buffer = noise;
+        const f = ac.createBiquadFilter(), g = ac.createGain();
+        const len = kind === 'S' ? 0.12 : 0.03;
+        f.type = kind === 'S' ? 'bandpass' : 'highpass'; f.frequency.value = kind === 'S' ? 1800 : 7000;
+        g.gain.setValueAtTime(kind === 'S' ? 0.3 : 0.07 * (accent ? 1.4 : 1), t);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+        n.connect(f); f.connect(g); g.connect(bus); n.start(t); n.stop(t + len + 0.01);
+      }
+
+      // 曲を組み立てる：主旋律は「モチーフ(リズム+上下の動き)」をコードに合わせて当てはめる（ABACABAD構成）
+      function compose(spec) {
+        const R = rngOf(spec.seed), sc = SCALES[spec.mode];
+        const semi = i => sc[((i % 7) + 7) % 7] + 12 * Math.floor(i / 7);
+        const RHY = [[2, 2, 2, 2, 4, 4], [3, 3, 2, 4, 4], [2, 1, 1, 2, 2, 4, 4], [4, 2, 2, 2, 2, 4],
+                     [1, 1, 2, 1, 1, 2, 4, 4], [6, 2, 4, 4], [2, 2, 4, 2, 2, 4], [3, 1, 2, 2, 4, 2, 2]];
+        const motifs = {};
+        for (const L of 'ABCD') {
+          const rh = RHY[R() * RHY.length | 0];
+          motifs[L] = { rh, contour: rh.map(() => [-2, -1, -1, 0, 1, 1, 2, 3][R() * 8 | 0]) };
+        }
+        const lead = {}, bass = {}, chords = [];
+        let idx = 9;
+        'ABACABAD'.split('').forEach((L, bar) => {
+          const deg = spec.prog[bar] - 1, chord = [deg, deg + 2, deg + 4];
+          chords.push(chord.map(c => spec.root + 12 + semi(c)));
+          const { rh, contour } = motifs[L];
+          let st = bar * 16;
+          rh.forEach((len, i) => {
+            const strong = st % 4 === 0, lastNote = i === rh.length - 1;
+            idx += contour[i];
+            if (strong || lastNote) { // 強拍はコードの音に寄せる
+              let best = idx, bd = 99;
+              for (let o = 0; o <= 2; o++) for (const c of chord) { const cand = c + 7 * o; const d = Math.abs(cand - idx); if (d < bd) { bd = d; best = cand; } }
+              idx = best;
+            }
+            if (bar === 7 && lastNote) idx = 14; // 最後は主音で落ち着かせる
+            idx = Math.max(7, Math.min(16, idx));
+            if (strong || R() > 0.08) lead[st] = [spec.root + semi(idx), len];
+            st += len;
+          });
+          // ベース
+          const b0 = spec.root - 12 + semi(deg) - (semi(deg) >= 7 ? 12 : 0);
+          for (let k = 0; k < 16; k++) {
+            const t = bar * 16 + k;
+            if (spec.bass === 'oct' && k % 2 === 0) bass[t] = [k % 4 === 0 ? b0 : b0 + 12, 2];
+            if (spec.bass === 'drive' && k % 2 === 0) bass[t] = [b0, 2];
+            if (spec.bass === 'walk' && k % 4 === 0) bass[t] = [b0 + [0, 7, 12, 7][k / 4], 4];
+          }
+        });
+        return { lead, bass, chords };
+      }
+
+      function playStep(st, t, sixteenth) {
+        const sp = SONGS[songId];
+        const l = song.lead[st], b = song.bass[st];
+        if (l) note(sp.lead, l[0], t, l[1] * sixteenth * 0.92, 0.12);
+        if (b) note('tri', b[0], t, b[1] * sixteenth * 0.9, 0.26);
+        if (sp.arp || fever) { // 分散和音
+          const ch = song.chords[Math.floor(st / 16)];
+          const m = ch[st % 3] + (fever && st % 6 >= 3 ? 12 : 0);
+          note(0.125, m, t, sixteenth * 0.8, fever ? 0.06 : 0.045);
+        }
+        const dr = DRUMS[sp.drums], k = st % 16;
+        if (dr.K[k] === 'x') drum('K', t);
+        if (dr.S[k] === 'x') drum('S', t);
+        if (dr.H[k] === 'x' || (fever && k % 2 === 1)) drum('H', t, k % 4 === 0);
+      }
+
+      function tick() {
+        if (!song || paused) return;
+        const sp = SONGS[songId];
+        const sixteenth = 60 / (sp.bpm * (fever ? 1.12 : 1)) / 4;
+        while (nextT < ac.currentTime + 0.12) {
+          playStep(step, nextT, sixteenth);
+          nextT += sixteenth;
+          step = (step + 1) % 128;
+        }
+      }
+
+      function play(id) {
+        if (!ac || !bus) { pendingId = id; return; }
+        if (songId === id && song) return; // 同じ曲なら続ける
+        songId = id; song = compose(SONGS[id]); step = 0;
+        nextT = ac.currentTime + 0.05;
+        if (!timer) timer = setInterval(tick, 25);
+      }
+      function stop() { song = null; songId = null; pendingId = null; }
+      function jingle(id) {
+        stop();
+        if (!ac || !bus) return;
+        const j = JINGLES[id], six = 60 / j.bpm / 4;
+        let t = ac.currentTime + 0.05;
+        for (const [m, len] of j.lead) { note(0.25, m, t, len * six * 0.95, 0.14); t += len * six; }
+        t = ac.currentTime + 0.05;
+        for (const [m, len] of j.bass) { note('tri', m, t, len * six * 0.95, 0.26); t += len * six; }
+      }
+      return {
+        setup, play, stop, jingle, setVol,
+        setFever(on) { fever = on; },
+        pause(p) { paused = p; setVol(); if (!p && ac) nextT = ac.currentTime + 0.05; },
+        current: () => songId,
+      };
+    })();
 
     function init() {
       if (ac) { if (ac.state !== 'running') ac.resume(); return; }
@@ -479,6 +658,7 @@
       noise = ac.createBuffer(1, ac.sampleRate * 0.3, ac.sampleRate);
       const d = noise.getChannelData(0);
       for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      Music.setup();
     }
 
     function setVolume() {
@@ -574,7 +754,7 @@
     const rallyPitch = (rally) => 1 + Math.min(rally, 16) * 0.025;
 
     return {
-      init, setVolume,
+      init, setVolume, music: Music,
       // power: 当たりの強さ 0〜1 / spin: 回転の強さ 0〜1
       paddle(power, spin, rally) {
         if (!ok('paddle', 40)) return;
@@ -993,6 +1173,7 @@
     particles = []; dmgTexts = []; items = []; popups = []; zaps = []; swingHist = [];
     eff.wide = 0; eff.power = 0; eff.poison = 0; eff.barrier = 0;
     fever = 0; feverGauge = 0; stageTime = 0; windT = 0;
+    SFX.music.setFever(false);
     boss = null; shots = []; bossDone = false; eff.stun = 0; eff.safe = 0;
     history = [];
     makeBricks(); // 先にブロック（パドルの上限がブロック位置で決まるため）
@@ -1003,6 +1184,7 @@
     ball = {};
     resetBall();
     buildBg(themeOf(n));
+    SFX.music.play('s' + n);
     const t = themeOf(n);
     banner = { text: `STAGE ${n}`, sub: t.name, color: t.accent, life: 2.2 };
   }
@@ -1019,6 +1201,7 @@
     if (!paddle) { paddle = { x: W / 2, vx: 0, prevX: W / 2, vy: 0, y: null }; layoutPaddle(); targetX = paddle.x; }
     if (!ball || ball.r == null) { ball = {}; bricks = bricks || []; ball.r = Math.max(6, W * 0.022); ball.x = W / 2; ball.y = H / 2; ball.vx = 0; ball.vy = 0; ball.spin = 0; ball.rot = 0; }
     buildBg(themeOf(1));
+    SFX.music.play('title');
     setTitle(true);
   }
 
@@ -1212,7 +1395,7 @@
     if (state === 'stageClear') {
       stageTimer -= dt;
       if (stageTimer <= 0) {
-        if (stage >= STAGES) { state = 'allClear'; saveScore(); }
+        if (stage >= STAGES) { state = 'allClear'; saveScore(); SFX.music.jingle('allclear'); }
         else loadStage(stage + 1);
       }
       return;
@@ -1430,7 +1613,7 @@
       SFX.selfDestruct();
       explode(ball.x, H - 4);
       feverGauge = 0;
-      if (lives <= 0) state = 'over'; // 記録はタイトルへ戻る時（巻き戻しで復活できるように）
+      if (lives <= 0) { state = 'over'; SFX.music.jingle('over'); } // 記録はタイトルへ戻る時（巻き戻しで復活できるように）
       else resetBall();
     }
   }
@@ -1487,7 +1670,7 @@
 
   function stageClear() {
     if (state !== 'play') return;
-    state = 'stageClear'; stageTimer = 2.4; SFX.clear();
+    state = 'stageClear'; stageTimer = 2.6; SFX.music.jingle('clear'); SFX.music.setFever(false);
     for (const k of bricks) k.reviveT = 0;
     score += 500 * stage;
     banner = { text: 'STAGE CLEAR!', sub: `ボーナス +${500 * stage}`, color: '#fff27a', life: 2.2 };
@@ -1606,13 +1789,14 @@
     return !!before && before[1] < H * 0.25;
   }
   function updateFever(dt) {
-    if (fever > 0) { fever = Math.max(0, fever - dt); if (fever === 0) SFX.feverEnd(); return; }
+    if (fever > 0) { fever = Math.max(0, fever - dt); if (fever === 0) { SFX.feverEnd(); SFX.music.setFever(false); } return; }
     if (state !== 'play') return;
     const near = speedOf() >= H * CFG.maxSpeed * 0.9;
     feverGauge = Math.max(0, Math.min(1, feverGauge + (near ? dt / 3 : -dt / 6)));
     if (feverGauge >= 1) {
       fever = 8; feverGauge = 0;
       SFX.feverStart();
+      SFX.music.setFever(true);
       banner = { text: 'FEVER!!', sub: '8秒間 一撃・落ちない・スコア2倍', color: '#ff7ae0', life: 1.8 };
     }
   }
@@ -1643,6 +1827,8 @@
     for (const b of bricks) b.reviveT = 0;
     banner = { text: 'WARNING', sub: boss.name, color: '#ff4d4d', life: 2.2 };
     SFX.bossAppear();
+    SFX.music.stop();
+    setTimeout(() => { if (boss) SFX.music.play(stage === STAGES ? 'last' : 'boss'); }, 1300); // 警報のあとボス曲
   }
 
   function updateBoss(dt) {
@@ -2398,11 +2584,13 @@
     if (key === 'maxSpeed' && ball && state === 'play' && speedOf() > H * v) setSpeed(H * v);
     if (key === 'maxSpin' && ball) clampSpin();
     if (key === 'volume' || key === 'muted') SFX.setVolume();
+    if (key === 'bgmVol') SFX.music.setVol();
   }
 
   const pauseBtn = document.getElementById('pauseBtn');
   function setPaused(p) {
     paused = p;
+    SFX.music.pause(p);
     pauseBtn.textContent = p ? '▶' : '⏸';
     pauseBtn.classList.toggle('on', p);
   }
@@ -2569,6 +2757,8 @@
     shots = sn.shots.map(x => ({ ...x }));
     moveBricks(0);
     trail = [];
+    if (state === 'play' || state === 'ready') SFX.music.play(boss ? (stage === STAGES ? 'last' : 'boss') : 's' + stage);
+    SFX.music.setFever(fever > 0);
   }
   function recordHistory() {
     if (state !== 'play' && state !== 'ready') return;
