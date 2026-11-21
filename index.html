@@ -1696,7 +1696,12 @@
     bounce(nX, nY, 'boss');
     ball.selfHit = false;
     // フィーバー中でも一撃にはしない（上限150）
-    if (b.inv > 0) { SFX.wall(power); return; } // 連続ヒット防止の無敵時間
+    // 連続ヒット防止の無敵時間（0.35秒）。ただし無敵中でも3回に1回はダメージが入る
+    if (b.inv > 0) {
+      b.invHits = (b.invHits || 0) + 1;
+      if (b.invHits < 3) { SFX.wall(power); return; }
+    }
+    b.invHits = 0;
     b.inv = 0.35;
     const raw = fever > 0 ? Math.max(150, ballDamage()) : ballDamage();
     const dmg = Math.min(b.hp, Math.max(0, raw - armorOf()));
