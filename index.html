@@ -1383,8 +1383,9 @@
       if (b.stuck == null) continue;
       useBall(b);
       b.stuck = null;
-      b.vx = 0; b.vy = b.stuckSpeed || H * CFG.speed;
-      releasing = true; hitPaddle(-1); releasing = false;
+      const dir = b.stuckDir > 0 ? 1 : -1;
+      b.vx = 0; b.vy = -dir * (b.stuckSpeed || H * CFG.speed); // パドルに向かってくる向きにしてから打ち返す
+      releasing = true; hitPaddle(dir); releasing = false;
     }
     if (balls.length) useBall(balls[0]);
   }
@@ -1574,7 +1575,7 @@
       useBall(b);
       if (b.stuck != null) { // マグネットで吸着中：パドルと一緒に動く
         b.x = Math.max(b.r, Math.min(W - b.r, paddle.x + b.stuck));
-        b.y = paddle.y - b.r;
+        b.y = b.stuckDir > 0 ? paddle.y + paddle.h + b.r : paddle.y - b.r;
         continue;
       }
       const steps = Math.max(1, Math.ceil(speedOf() * dt / (ball.r * 0.8)));
@@ -1587,13 +1588,14 @@
 
   // dir = -1：表で上へ打つ / +1：裏で下へ打つ（自爆の危険）
   function hitPaddle(dir) {
-    // マグネット：指を置いている間は表で受けたボールが吸着（指を離すと弾く）
-    if (dir < 0 && eff.magnet > 0 && fingerDown && !releasing) {
+    // マグネット：指を置いている間は表でも裏でも、当たったボールが吸着（指を離すと弾く）
+    if (eff.magnet > 0 && fingerDown && !releasing) {
       if (ball.extra) { setSpeed(Math.max(speedOf() - ball.extra, H * 0.05)); ball.extra = 0; }
       ball.stuckSpeed = Math.max(speedOf(), H * CFG.speed);
       ball.stuck = Math.max(-paddle.w / 2, Math.min(paddle.w / 2, ball.x - paddle.x));
+      ball.stuckDir = dir; // -1=表（上） 1=裏（下）
       ball.vx = 0; ball.vy = 0;
-      ball.y = paddle.y - ball.r;
+      ball.y = dir < 0 ? paddle.y - ball.r : paddle.y + paddle.h + ball.r;
       SFX.magnet();
       return;
     }
@@ -2748,8 +2750,12 @@
     if (eff.safe > 0) ctx.globalAlpha = Math.sin(stageTime * 25) > 0 ? 0.45 : 0.9; // 無敵中は点滅
     if (eff.ghost > 0) ctx.globalAlpha = Math.max(0, 1 - eff.ghost); // 透明（最後の1秒で戻る）
     if (eff.magnet > 0 && eff.ghost <= 0) { // マグネット中：両端が赤と青
-      ctx.save(); ctx.fillStyle = '#ff4d6d'; ctx.fillRect(paddle.x - paddle.w / 2, paddle.y - 3, 10, 3);
-      ctx.fillStyle = '#4dd8ff'; ctx.fillRect(paddle.x + paddle.w / 2 - 10, paddle.y - 3, 10, 3); ctx.restore();
+      ctx.save();
+      for (const yy of [paddle.y - 3, paddle.y + paddle.h]) { // 表と裏の両方
+        ctx.fillStyle = '#ff4d6d'; ctx.fillRect(paddle.x - paddle.w / 2, yy, 10, 3);
+        ctx.fillStyle = '#4dd8ff'; ctx.fillRect(paddle.x + paddle.w / 2 - 10, yy, 10, 3);
+      }
+      ctx.restore();
     }
     roundRect(paddle.x - paddle.w / 2, paddle.y, paddle.w, paddle.h, paddle.h / 2);
     ctx.fill();
@@ -3190,7 +3196,7 @@
     SFX.music.setFever(fever > 0);
   }
   // ボールは数値の配列に詰めて記録（数が多くても軽い）
-  const BF = 11;
+  const BF = 12;
   function packBalls() {
     const a = new Float64Array(balls.length * BF);
     balls.forEach((b, i) => {
@@ -3198,6 +3204,7 @@
       a[o] = b.x; a[o + 1] = b.y; a[o + 2] = b.vx; a[o + 3] = b.vy; a[o + 4] = b.spin; a[o + 5] = b.rot;
       a[o + 6] = b.extra || 0; a[o + 7] = b.stuck == null ? NaN : b.stuck; a[o + 8] = b.stuckSpeed || 0; a[o + 9] = b.r;
       a[o + 10] = (b.dead ? 1 : 0) | (b.selfHit ? 2 : 0);
+      a[o + 11] = b.stuckDir || -1;
     });
     return a;
   }
@@ -3206,7 +3213,7 @@
     for (let o = 0; o < a.length; o += BF) {
       list.push({ x: a[o], y: a[o + 1], vx: a[o + 2], vy: a[o + 3], spin: a[o + 4], rot: a[o + 5], extra: a[o + 6],
         stuck: Number.isNaN(a[o + 7]) ? null : a[o + 7], stuckSpeed: a[o + 8], r: a[o + 9],
-        dead: !!(a[o + 10] & 1), selfHit: !!(a[o + 10] & 2), trail: [] });
+        dead: !!(a[o + 10] & 1), selfHit: !!(a[o + 10] & 2), stuckDir: a[o + 11], trail: [] });
     }
     return list.length ? list : [{ x: W / 2, y: H / 2, vx: 0, vy: 0, spin: 0, rot: 0, r: Math.max(2, W * 0.022 * objK()), trail: [] }];
   }
