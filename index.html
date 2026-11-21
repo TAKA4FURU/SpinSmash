@@ -648,19 +648,19 @@
       };
       // root=基準音(MIDI) prog=8小節のコード(音階の度数) lead=旋律の矩形波デューティ bass=ベースの刻み方
       const SONGS = {
-        title:  { root: 60, mode: 'major',      bpm: 140, prog: [1, 5, 6, 4, 1, 5, 4, 5], lead: 0.25,  bass: 'oct',   drums: 'four',  arp: true,  seed: 11 },
-        s1:     { lv: 1.6, genre: 'ambient',  root: 55, mode: 'lydian',     bpm: 84,  prog: [1, 4, 1, 5, 6, 4, 2, 5], seed: 21 },  // くさ：アンビエント
-        s2:     { lv: 1.4, genre: 'lofi',     root: 62, mode: 'dorian',     bpm: 82,  prog: [1, 4, 1, 4, 6, 5, 4, 5], seed: 32 },  // みず：チル／Lo-fi
+        title:  { lv: 0.881, root: 60, mode: 'major',      bpm: 140, prog: [1, 5, 6, 4, 1, 5, 4, 5], lead: 0.25,  bass: 'oct',   drums: 'four',  arp: true,  seed: 11 },
+        s1:     { lv: 2.158, genre: 'ambient',  root: 55, mode: 'lydian',     bpm: 84,  prog: [1, 4, 1, 5, 6, 4, 2, 5], seed: 21 },  // くさ：アンビエント
+        s2:     { lv: 1.783, genre: 'lofi',     root: 62, mode: 'dorian',     bpm: 82,  prog: [1, 4, 1, 4, 6, 5, 4, 5], seed: 32 },  // みず：チル／Lo-fi
         s3:     { lv: 1.0, genre: 'dnb',      root: 57, mode: 'minor',      bpm: 174, prog: [1, 6, 7, 1, 1, 6, 4, 5], seed: 43 },  // ほのお：ドラムンベース
-        s4:     { lv: 1.0, genre: 'techno',   root: 52, mode: 'minor',      bpm: 132, prog: [1, 1, 6, 7, 1, 1, 4, 5], seed: 54 },  // でんき：テクノ
-        s5:     { lv: 1.0, genre: 'trance',   root: 53, mode: 'minor',      bpm: 145, prog: [1, 6, 3, 7, 1, 6, 4, 5], seed: 65 },  // ひこう：トランス／ユーロビート
-        s6:     { lv: 0.6, genre: 'rock',     root: 52, mode: 'minor',      bpm: 150, prog: [1, 6, 7, 1, 4, 6, 7, 5], seed: 76 },  // いわ：ロック
-        s7:     { lv: 0.85, genre: 'icebox',   root: 59, mode: 'minor',      bpm: 140, prog: [1, 6, 3, 7, 1, 6, 4, 5], seed: 87 },  // こおり：オルゴール＋チルステップ
-        s8:     { lv: 1.4, genre: 'swing',    root: 50, mode: 'harmonic',   bpm: 132, prog: [1, 4, 1, 5, 1, 4, 5, 1], seed: 98 },  // どく：怪しいスウィング
-        s9:     { lv: 0.6, genre: 'metal',    root: 40, mode: 'phrygian',   bpm: 168, prog: [1, 1, 2, 1, 6, 7, 2, 1], seed: 109 }, // はがね：インダストリアル＋ヘビーメタル
-        s10:    { lv: 1.2, custom: 'choir', bpm: 100, verb: 0.45 }, // せいぶつ：荘厳な混成合唱（オリジナル曲）
-        boss:   { lv: 0.9, genre: 'epic',     root: 48, mode: 'harmonic',   bpm: 170, prog: [1, 1, 6, 6, 4, 4, 5, 5], seed: 131 }, // ボス：壮大なバトル曲
-        last:   { lv: 1.4, custom: 'sutra', bpm: 120, verb: 0.4 },  // ラスボス：お経・木魚・りんの静かな緊張感
+        s4:     { lv: 0.861, genre: 'techno',   root: 52, mode: 'minor',      bpm: 132, prog: [1, 1, 6, 7, 1, 1, 4, 5], seed: 54 },  // でんき：テクノ
+        s5:     { lv: 0.955, genre: 'trance',   root: 53, mode: 'minor',      bpm: 145, prog: [1, 6, 3, 7, 1, 6, 4, 5], seed: 65 },  // ひこう：トランス／ユーロビート
+        s6:     { lv: 0.411, genre: 'rock',     root: 52, mode: 'minor',      bpm: 150, prog: [1, 6, 7, 1, 4, 6, 7, 5], seed: 76 },  // いわ：ロック
+        s7:     { lv: 0.698, genre: 'icebox',   root: 59, mode: 'minor',      bpm: 140, prog: [1, 6, 3, 7, 1, 6, 4, 5], seed: 87 },  // こおり：オルゴール＋チルステップ
+        s8:     { lv: 1.866, genre: 'swing',    root: 50, mode: 'harmonic',   bpm: 132, prog: [1, 4, 1, 5, 1, 4, 5, 1], seed: 98 },  // どく：怪しいスウィング
+        s9:     { lv: 0.445, genre: 'metal',    root: 40, mode: 'phrygian',   bpm: 168, prog: [1, 1, 2, 1, 6, 7, 2, 1], seed: 109 }, // はがね：インダストリアル＋ヘビーメタル
+        s10:    { lv: 1.107, custom: 'choir', bpm: 100, verb: 0.45 }, // せいぶつ：荘厳な混成合唱（オリジナル曲）
+        boss:   { lv: 0.683, genre: 'epic',     root: 48, mode: 'harmonic',   bpm: 170, prog: [1, 1, 6, 6, 4, 4, 5, 5], seed: 131 }, // ボス：壮大なバトル曲
+        last:   { lv: 1.782, custom: 'sutra', bpm: 120, verb: 0.4 },  // ラスボス：お経・木魚・りんの静かな緊張感
       };
       const JINGLES = { // [MIDI, 16分音符の長さ]
         clear:    { bpm: 150, lead: [[72, 2], [76, 2], [79, 2], [84, 6], [83, 2], [84, 10]], bass: [[48, 8], [55, 8], [48, 8]] },
