@@ -463,6 +463,7 @@
     liftDecay:  1.5,   // 強打で上がった速度が元に戻る速さ
     slowPower:  0.12,
     startLives: 5,     // ゲーム開始時の残機
+    maxBalls:   1000,  // ボールの上限（達したら ×2〜×10 は出ない・増えない）
     objScale:   0.5,   // ボールとパドルの大きさ（1, 1/2, 1/4, 1/8）
     brickScale: 0.125, // ブロックの大きさ（1, 1/2, 1/4, 1/8。小さいほど数が増える）
     sensX:      1.5,   // 横の感度（指の移動量に対するパドルの移動量）
@@ -493,6 +494,7 @@
     { key: 'spinAccel',  label: '回転で加速（最大倍率）', min: 1, max: 1.2, step: 0.005 },
     { key: 'maxSpeed',   label: '最高速度',     min: 0.6, max: 2.5, step: 0.05 },
     { key: 'beamSpeed',  label: 'ビーム発生速度', min: 0.2, max: 2.5, step: 0.05 },
+    { key: 'maxBalls',   label: 'ボールの上限', min: 10, max: 1000, step: 10 },
     { key: 'startLives', label: '残機（次のゲームから）', min: 1, max: 99, step: 1 },
     { key: 'sensX',      label: '横の感度',     min: 0.5, max: 3, step: 0.1 },
     { key: 'sensY',      label: '縦の感度',     min: 0.5, max: 3, step: 0.1 },
@@ -1062,6 +1064,8 @@
   // 複数ボール：balls に全部、ball は「いま処理・描画しているボール」
   let balls = [];
   function useBall(b) { ball = b; trail = b.trail || (b.trail = []); }
+  // ビーム付きで描くボールの数（多い時は減らして軽くする）
+  const beamLimit = () => balls.length > 100 ? 3 : balls.length > 30 ? 6 : 12;
   let fingerDown = false, releasing = false;
 
   // ---- 背景：テーマの模様を1枚描いておき、上から下へスクロール ----
@@ -1138,14 +1142,14 @@
     const gap = Math.max(0.5, 3 * S), side = 6;
     const bw = (W - side * 2 - gap * (cols - 1)) / cols;
     const bh = Math.max(12, H * 0.024) * S;
-    brickTop = top + 20; brickRowH = bh + gap;
-    bricksByRow = [];
+    brickTop = top + 20; brickRowH = bh + gap; brickColW = bw + gap; brickSide = side;
+    brickGrid = [];
     for (const b of bricks) {
       b.baseX = side + b.c * (bw + gap);
       b.x = b.baseX;
       b.y = brickTop + b.r * brickRowH;
       b.w = bw; b.h = bh;
-      (bricksByRow[b.r] || (bricksByRow[b.r] = [])).push(b);
+      (brickGrid[b.r] || (brickGrid[b.r] = []))[b.c] = b; // 段・列から直接引けるように
     }
     // 動く列：その列の空きスペースぶんだけ左右に揺れる
     rowAmp = [];
@@ -1165,7 +1169,9 @@
     const sp = 0.7 + stage * 0.08;
     for (const b of bricks) {
       const a = rowAmp[b.r] || 0;
-      b.x = a ? b.baseX + Math.sin(stageTime * sp + (b.or ?? b.r) * 1.7) * a : b.baseX;
+      const off = a ? Math.sin(stageTime * sp + (b.or ?? b.r) * 1.7) * a : 0;
+      rowOff[b.r] = off;
+      b.x = b.baseX + off;
     }
   }
 
@@ -1205,7 +1211,8 @@
   const objK = () => CFG.objScale || 1;     // ボール・パドル
   const brickK = () => CFG.brickScale || 1; // ブロック
   const subdiv = () => Math.max(1, Math.round(1 / brickK()));
-  let colsInStage = COLS, bricksByRow = [], brickTop = 0, brickRowH = 1;
+  let aliveCount = 0; // 残っているブロックの数（毎回数え直さない）
+  let colsInStage = COLS, brickGrid = [], brickTop = 0, brickRowH = 1, brickColW = 1, brickSide = 6, rowOff = [];
   function makeBricks() {
     bricks = [];
     const theme = themeOf(stage), k = hpScaleOf(stage), f = subdiv();
@@ -1234,6 +1241,7 @@
         }
       }
     });
+    aliveCount = bricks.length;
     layoutBricks();
   }
 
@@ -1463,6 +1471,7 @@
 
   // ビーム用の軌跡を記録（近すぎる点は間引く）
   function recordTrail() {
+    if (!ball.beam) return; // ビームを描くのは先頭12個だけ
     const n = trail.length;
     if (n >= 2) {
       const dx = ball.x - trail[n - 2], dy = ball.y - trail[n - 1];
@@ -1554,6 +1563,8 @@
     }
     if (state !== 'play') return;
 
+    const beams = beamLimit();
+    for (let i = 0; i < balls.length; i++) balls[i].beam = i < beams;
     for (const b of balls.slice()) {
       if (b.dead || state !== 'play') continue;
       useBall(b);
@@ -1700,8 +1711,15 @@
     const ry0 = Math.max(0, Math.floor((ball.y - ball.r - brickTop) / brickRowH));
     const ry1 = Math.min(rowsInStage - 1, Math.floor((ball.y + ball.r - brickTop) / brickRowH));
     brickLoop:
-    for (let rr = ry0; rr <= ry1; rr++) for (const b of bricksByRow[rr] || []) {
-      if (!b.alive) continue;
+    for (let rr = ry0; rr <= ry1; rr++) {
+      const row = brickGrid[rr];
+      if (!row) continue;
+      const off = rowOff[rr] || 0;
+      const cx0 = Math.max(0, Math.floor((ball.x - ball.r - brickSide - off) / brickColW));
+      const cx1 = Math.min(colsInStage - 1, Math.floor((ball.x + ball.r - brickSide - off) / brickColW));
+      for (let cc = cx0; cc <= cx1; cc++) {
+      const b = row[cc];
+      if (!b || !b.alive) continue;
       const nx = Math.max(b.x, Math.min(ball.x, b.x + b.w));
       const ny = Math.max(b.y, Math.min(ball.y, b.y + b.h));
       let dx = ball.x - nx, dy = ball.y - ny;
@@ -1725,6 +1743,7 @@
         bounce(nX, nY, 'brickHit', b.r);
         spawnParticles(b, nX, nY, 0.3);
         break brickLoop;
+      }
       }
     }
 
@@ -1806,6 +1825,7 @@
     }
     // 倒した
     b.alive = false;
+    aliveCount--;
     chain++;
     score += Math.round(b.maxHp * rallyMult() * (fever > 0 ? 2 : 1));
     SFX.brick(b.r, power || 0.6, chain, true);
@@ -1817,7 +1837,7 @@
     if (key === 'bio' && !b.revived && Math.random() < 0.35) { b.reviveT = 7; }
     if (key === 'fire' && source !== 'fire') burn(b);
     if (key === 'electric' && source === 'ball') zap(b, b.maxHp * 0.5);
-    if (bricks.every(k => !k.alive) && !boss && !bossDone) spawnBoss();
+    if (aliveCount <= 0 && !boss && !bossDone) spawnBoss();
     return true;
   }
 
@@ -1844,9 +1864,12 @@
   // でんき：他のブロック2個に放電
   let zaps = [];
   function zap(from, amount) {
-    const targets = bricks.filter(k => k.alive && k !== from);
-    for (let i = 0; i < 2 && targets.length; i++) {
-      const t = targets.splice(Math.random() * targets.length | 0, 1)[0];
+    const targets = [];
+    for (let tries = 0; tries < 20 && targets.length < 2 && aliveCount > 1; tries++) {
+      const k = bricks[Math.random() * bricks.length | 0];
+      if (k.alive && k !== from && !targets.includes(k)) targets.push(k);
+    }
+    for (const t of targets) {
       zaps.push({ x0: from.x + from.w / 2, y0: from.y + from.h / 2, x1: t.x + t.w / 2, y1: t.y + t.h / 2, life: 0.18 });
       damageBrick(t, Math.round(amount * 0.5), 'zap');
       if (state !== 'play') return;
@@ -1872,8 +1895,10 @@
   let items = [];
   const eff = { wide: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0 }; // アイテム・毒の効果時間
   function dropItem(b) {
-    let r = Math.random() * ITEMS.reduce((a, it) => a + it.w, 0), it = ITEMS[0];
-    for (const x of ITEMS) { r -= x.w; if (r <= 0) { it = x; break; } }
+    // ボールが上限なら、増えるアイテムは出さない
+    const pool = balls.length >= CFG.maxBalls ? ITEMS.filter(x => !x.mult) : ITEMS;
+    let r = Math.random() * pool.reduce((a, it) => a + it.w, 0), it = pool[0];
+    for (const x of pool) { r -= x.w; if (r <= 0) { it = x; break; } }
     items.push({ ...it, x: b.x + b.w / 2, y: b.y + b.h / 2, vy: H * 0.22 });
   }
   function updateItems(dt) {
@@ -1923,6 +1948,7 @@
       if (b.dead) continue;
       const sp = Math.hypot(b.vx, b.vy), ang = Math.atan2(b.vy, b.vx);
       for (let i = 1; i < k; i++) {
+        if (balls.length + add.length >= CFG.maxBalls) break; // 上限を超えては増えない
         const nb = { ...b, trail: [] };
         if (b.stuck != null) { nb.stuck = Math.max(-paddle.w / 2, Math.min(paddle.w / 2, b.stuck + (Math.random() - 0.5) * paddle.w * 0.6)); }
         else {
@@ -1947,7 +1973,7 @@
       // せいぶつ：倒したブロックが時々復活
       if (!b.alive && b.reviveT > 0) {
         b.reviveT -= dt;
-        if (b.reviveT <= 0) { b.alive = true; b.revived = true; b.hp = Math.round(b.maxHp * 0.5); b.hitT = 1; addPopup(b.x + b.w / 2, b.y, '復活', '#ff6f91'); }
+        if (b.reviveT <= 0) { b.alive = true; aliveCount++; b.revived = true; b.hp = Math.round(b.maxHp * 0.5); b.hitT = 1; addPopup(b.x + b.w / 2, b.y, '復活', '#ff6f91'); }
       }
     }
     // みず：画面中央の水流（5秒ごとに向きが変わる）／ひこう：時々横風
@@ -2728,7 +2754,22 @@
 
     if (state !== 'over' && state !== 'allClear') {
       // ボールが多い時はビームを先頭12個まで（重くならないように）
-      balls.forEach((b, i) => { useBall(b); if (i < 12) drawTrail(); drawBall(); });
+      // 先頭12個はビーム付きの2色ボール、それ以降は回転の向きで色分けした単色の丸をまとめて描く
+      const n = Math.min(beamLimit(), balls.length);
+      for (let i = 0; i < n; i++) { useBall(balls[i]); drawTrail(); drawBall(); }
+      if (balls.length > n) {
+        for (const [col, pos] of [[BALL_COLOR_B, true], [BALL_COLOR_A, false]]) {
+          ctx.fillStyle = col;
+          ctx.beginPath();
+          for (let i = n; i < balls.length; i++) {
+            const b = balls[i];
+            if ((b.spin >= 0) !== pos) continue;
+            ctx.moveTo(b.x + b.r, b.y);
+            ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+          }
+          ctx.fill();
+        }
+      }
       if (balls.length) useBall(balls[0]);
     }
 
@@ -3118,7 +3159,7 @@
   let history = [], rewinding = false, rewindSfxT = 0, lastPX = 0, lastPY = 0;
   function snapshot() {
     return {
-      balls: balls.map(b => ({ ...b, trail: null })), px: paddle.x, py: paddle.y, pw: paddle.w,
+      balls: packBalls(), px: paddle.x, py: paddle.y, pw: paddle.w,
       br: bricks.map(b => [b.alive, b.hp, b.reviveT, b.revived]),
       score, lives, state, rally, chain, stageTime, windT, bossDone,
       items: items.map(i => ({ ...i })), eff: { ...eff }, fever, feverGauge,
@@ -3126,7 +3167,7 @@
     };
   }
   function restore(sn) {
-    balls = sn.balls.map(b => ({ ...b, trail: [] }));
+    balls = unpackBalls(sn.balls);
     useBall(balls[0]);
     paddle.x = paddle.prevX = sn.px; paddle.y = paddle.frameStartY = sn.py; paddle.w = sn.pw;
     paddle.vx = 0; paddle.vy = 0;
@@ -3134,6 +3175,7 @@
     // 指を置いたままでもパドルが飛ばないよう、ドラッグの基準を今の指の位置に合わせ直す
     touchStartX = lastPX; paddleStartX = sn.px; touchStartY = lastPY; paddleStartY = sn.py;
     sn.br.forEach((v, i) => { const b = bricks[i]; if (b) [b.alive, b.hp, b.reviveT, b.revived] = v; });
+    aliveCount = bricks.reduce((n, b) => n + (b.alive ? 1 : 0), 0);
     ({ score, lives, state, rally, chain, stageTime, windT, bossDone, fever, feverGauge } = sn);
     items = sn.items.map(i => ({ ...i }));
     Object.assign(eff, sn.eff);
@@ -3143,15 +3185,38 @@
     if (state === 'play' || state === 'ready') SFX.music.play(boss ? (stage === STAGES ? 'last' : 'boss') : 's' + stage);
     SFX.music.setFever(fever > 0);
   }
+  // ボールは数値の配列に詰めて記録（数が多くても軽い）
+  const BF = 11;
+  function packBalls() {
+    const a = new Float64Array(balls.length * BF);
+    balls.forEach((b, i) => {
+      const o = i * BF;
+      a[o] = b.x; a[o + 1] = b.y; a[o + 2] = b.vx; a[o + 3] = b.vy; a[o + 4] = b.spin; a[o + 5] = b.rot;
+      a[o + 6] = b.extra || 0; a[o + 7] = b.stuck == null ? NaN : b.stuck; a[o + 8] = b.stuckSpeed || 0; a[o + 9] = b.r;
+      a[o + 10] = (b.dead ? 1 : 0) | (b.selfHit ? 2 : 0);
+    });
+    return a;
+  }
+  function unpackBalls(a) {
+    const list = [];
+    for (let o = 0; o < a.length; o += BF) {
+      list.push({ x: a[o], y: a[o + 1], vx: a[o + 2], vy: a[o + 3], spin: a[o + 4], rot: a[o + 5], extra: a[o + 6],
+        stuck: Number.isNaN(a[o + 7]) ? null : a[o + 7], stuckSpeed: a[o + 8], r: a[o + 9],
+        dead: !!(a[o + 10] & 1), selfHit: !!(a[o + 10] & 2), trail: [] });
+    }
+    return list.length ? list : [{ x: W / 2, y: H / 2, vx: 0, vy: 0, spin: 0, rot: 0, r: Math.max(2, W * 0.022 * objK()), trail: [] }];
+  }
+  let histTick = 0;
   function recordHistory() {
     if (state !== 'play' && state !== 'ready') return;
+    if ((histTick++ & 1) === 0) return; // 2フレームに1回
     history.push(snapshot());
-    if (history.length > REWIND_SEC * 60) history.shift();
+    if (history.length > REWIND_SEC * 30) history.shift();
   }
   const canRewind = () => (state === 'play' || state === 'ready' || state === 'over') && history.length > 0;
   function rewindStep(dt) {
-    // 2倍速でさかのぼる
-    for (let i = 0; i < 2 && history.length; i++) restore(history.pop());
+    // 2倍速でさかのぼる（記録は2フレームに1回なので、1フレームに1つ戻す）
+    if (history.length) restore(history.pop());
     rewindSfxT -= dt;
     if (rewindSfxT <= 0) { SFX.rewind(); rewindSfxT = 0.22; }
     updateBg(-dt * 2);
@@ -3170,7 +3235,7 @@
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.fillText('◀◀ REWIND', W / 2, H * 0.3);
     ctx.font = 'bold 12px -apple-system, "Hiragino Sans", sans-serif';
-    ctx.fillText(`のこり ${(history.length / 60).toFixed(1)} 秒`, W / 2, H * 0.3 + 26);
+    ctx.fillText(`のこり ${(history.length / 30).toFixed(1)} 秒`, W / 2, H * 0.3 + 26);
   }
 
   // ---- ループ ----
