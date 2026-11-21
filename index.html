@@ -654,10 +654,10 @@
         s3:     { lv: 1.0, genre: 'dnb',      root: 57, mode: 'minor',      bpm: 174, prog: [1, 6, 7, 1, 1, 6, 4, 5], seed: 43 },  // ほのお：ドラムンベース
         s4:     { lv: 0.861, genre: 'techno',   root: 52, mode: 'minor',      bpm: 132, prog: [1, 1, 6, 7, 1, 1, 4, 5], seed: 54 },  // でんき：テクノ
         s5:     { lv: 0.955, genre: 'trance',   root: 53, mode: 'minor',      bpm: 145, prog: [1, 6, 3, 7, 1, 6, 4, 5], seed: 65 },  // ひこう：トランス／ユーロビート
-        s6:     { lv: 0.411, genre: 'rock',     root: 52, mode: 'minor',      bpm: 150, prog: [1, 6, 7, 1, 4, 6, 7, 5], seed: 76 },  // いわ：ロック
+        s6:     { lv: 0.288, genre: 'rock',     root: 52, mode: 'minor',      bpm: 150, prog: [1, 6, 7, 1, 4, 6, 7, 5], seed: 76 },  // いわ：ロック
         s7:     { lv: 0.698, genre: 'icebox',   root: 59, mode: 'minor',      bpm: 140, prog: [1, 6, 3, 7, 1, 6, 4, 5], seed: 87 },  // こおり：オルゴール＋チルステップ
         s8:     { lv: 1.866, genre: 'swing',    root: 50, mode: 'harmonic',   bpm: 132, prog: [1, 4, 1, 5, 1, 4, 5, 1], seed: 98 },  // どく：怪しいスウィング
-        s9:     { lv: 0.445, genre: 'metal',    root: 40, mode: 'phrygian',   bpm: 168, prog: [1, 1, 2, 1, 6, 7, 2, 1], seed: 109 }, // はがね：インダストリアル＋ヘビーメタル
+        s9:     { lv: 0.311, genre: 'metal',    root: 40, mode: 'phrygian',   bpm: 168, prog: [1, 1, 2, 1, 6, 7, 2, 1], seed: 109 }, // はがね：インダストリアル＋ヘビーメタル
         s10:    { lv: 1.107, custom: 'choir', bpm: 100, verb: 0.45 }, // せいぶつ：荘厳な混成合唱（オリジナル曲）
         boss:   { lv: 0.683, genre: 'epic',     root: 48, mode: 'harmonic',   bpm: 170, prog: [1, 1, 6, 6, 4, 4, 5, 5], seed: 131 }, // ボス：壮大なバトル曲
         last:   { lv: 1.782, custom: 'sutra', bpm: 120, verb: 0.4 },  // ラスボス：お経・木魚・りんの静かな緊張感
@@ -670,7 +670,8 @@
       };
 
       const freq = m => 440 * Math.pow(2, (m - 69) / 12);
-      function setup() {
+      // BGMの音の通り道（バス・残響への送り・ギターアンプ・こだま）を作る。曲を切り替える時は作り直して、前の曲の残りの音ごと消す
+      function buildChain() {
         bus = ac.createGain(); bus.gain.value = 0;
         duck = ac.createGain(); duck.gain.value = 1;     // キックに合わせて伴奏を少し引っ込める（ポンプ感）
         duck.connect(bus);
@@ -690,6 +691,17 @@
         if (ep.pan) ep.pan.value = 0.5;
         echo.connect(fb); fb.connect(echo); echo.connect(ep); ep.connect(duck);
         setVol();
+      }
+      // 今鳴っているBGM（長く伸ばしている音・残響も含む）を素早くフェードアウトして消す
+      function cutOff(sec) {
+        if (!bus) return;
+        const old = bus, oldSend = musSend, t = ac.currentTime;
+        old.gain.cancelScheduledValues(t); old.gain.setValueAtTime(old.gain.value, t); old.gain.linearRampToValueAtTime(0, t + sec);
+        setTimeout(() => { try { old.disconnect(); oldSend.disconnect(); } catch (e) {} }, sec * 1000 + 300);
+        buildChain();
+      }
+      function setup() {
+        buildChain();
         for (const d of [0.125, 0.25, 0.5]) {
           const n = 40, re = new Float32Array(n), im = new Float32Array(n);
           for (let k = 1; k < n; k++) re[k] = 2 / (k * Math.PI) * Math.sin(k * Math.PI * d);
@@ -1238,16 +1250,18 @@
       function play(id) {
         if (!ac || !bus) { pendingId = id; return; }
         if (songId === id && song) return;
+        if (song) cutOff(0.25); // 前の曲の残りの音を消してから
         songId = id; song = SONGS[id].custom ? {} : compose(SONGS[id]); step = 0; loop = 0;
         if (musSend) musSend.gain.value = SONGS[id].verb || 0.22; // 曲ごとの残響の深さ
         setVol();
         nextT = ac.currentTime + 0.05;
         if (!timer) timer = setInterval(tick, 25);
       }
-      function stop() { song = null; songId = null; pendingId = null; }
+      function stop() { if (song && ac) cutOff(0.15); song = null; songId = null; pendingId = null; }
       function jingle(id) {
         stop();
         if (!ac || !bus) return;
+        setVol();
         const j = JINGLES[id], six = 60 / j.bpm / 4, t0 = ac.currentTime + 0.05;
         let t = t0;
         for (const [m, len] of j.lead) {
