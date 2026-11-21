@@ -201,7 +201,7 @@
   const ctx = cv.getContext('2d');
 
   // ---- 基本設定 ----
-  const COLS = 7, ROWS = 6, LIVES = 3;
+  const COLS = 7, ROWS = 6, LIVES = 5;
   // ブロックのHP（上＝奥の段 → 下＝手前の段）
   const HP_BY_ROW = [100, 75, 55, 35, 20, 10];
   const DMG_MIN = 1, DMG_MAX = 100; // 初期速度で1、最高速度で100
@@ -462,7 +462,7 @@
     liftPower:  1.0,   // 振り上げて打った時の強打の強さ
     liftDecay:  1.5,   // 強打で上がった速度が元に戻る速さ
     slowPower:  0.12,
-    startLives: 3,     // ゲーム開始時の残機
+    startLives: 5,     // ゲーム開始時の残機
     sensX:      1.5,   // 横の感度（指の移動量に対するパドルの移動量）
     sensY:      1.5,   // 縦の感度  // 振り下げながら打った時の減速（1回で最大この割合だけ遅くなる）
     maxSpeed:   1.8,   // 最高速度（画面高さ/秒）
@@ -962,6 +962,17 @@
         tone(1400, 500, 0, 0.1, 0.08, 'sawtooth');
         tone(1800, 700, 0.1, 0.1, 0.06, 'sawtooth');
       },
+      // マグネット吸着：カチッ
+      magnet() {
+        if (!ok('magnet', 60)) return;
+        tone(600, 900, 0, 0.05, 0.18, 'square');
+      },
+      // ハズレ（透明）：ポワワン
+      ghost() {
+        if (!ok('ghost', 300)) return;
+        tone(600, 200, 0, 0.35, 0.2, 'sine');
+        tone(620, 210, 0.05, 0.35, 0.12, 'triangle');
+      },
       // 弾を消した：パリン
       shotBreak() {
         if (!ok('shotBreak', 40)) return;
@@ -1031,6 +1042,8 @@
   if (!(CFG.spinAccel >= 1)) CFG.spinAccel = DEFAULTS.spinAccel;
   // 最高速度の初期値を2.5→1.8に変更（保存済みの値が旧初期値のままなら新しい値に）
   if (!(CFG.cfgVer >= 3)) { if (CFG.maxSpeed === 2.5) CFG.maxSpeed = DEFAULTS.maxSpeed; CFG.cfgVer = 3; }
+  // 残機の初期値を3→5に変更
+  if (!(CFG.cfgVer >= 4)) { if (CFG.startLives === 3) CFG.startLives = DEFAULTS.startLives; CFG.cfgVer = 4; }
   function saveCfg() { try { localStorage.setItem(STORE_KEY, JSON.stringify(CFG)); } catch (e) {} }
 
   let W, H, dpr, top, safeBottom;
@@ -1042,6 +1055,10 @@
   let rally = 0, chain = 0, bestRally = 0;
   let paddleGlow = 0, rallyPop = 0;
   let trail = [], particles = [], dmgTexts = [], banner = null;
+  // 複数ボール：balls に全部、ball は「いま処理・描画しているボール」
+  let balls = [];
+  function useBall(b) { ball = b; trail = b.trail || (b.trail = []); }
+  let fingerDown = false, releasing = false;
 
   // ---- 背景：テーマの模様を1枚描いておき、上から下へスクロール ----
   let bgTile = null, bgOffset = 0, bgTheme = null, streakLen = 0;
@@ -1200,6 +1217,10 @@
   }
 
   function resetBall() {
+    ball = { trail: [] };
+    balls = [ball];
+    trail = ball.trail;
+    eff.magnet = 0; // マグネットはミスで解除
     ball.r = Math.max(6, W * 0.022);
     ball.x = paddle.x;
     ball.y = paddle.y - ball.r - 1;
@@ -1208,7 +1229,7 @@
     ball.rot = 0;
     ball.extra = 0;
     ball.selfHit = false;
-    trail = [];
+    ball.stuck = null;
     rally = 0; chain = 0;
     state = 'ready';
   }
@@ -1259,7 +1280,7 @@
     if (!scoreSaved && score > 0) saveScore();
     state = 'title';
     if (!paddle) { paddle = { x: W / 2, vx: 0, prevX: W / 2, vy: 0, y: null }; layoutPaddle(); targetX = paddle.x; }
-    if (!ball || ball.r == null) { ball = {}; bricks = bricks || []; ball.r = Math.max(6, W * 0.022); ball.x = W / 2; ball.y = H / 2; ball.vx = 0; ball.vy = 0; ball.spin = 0; ball.rot = 0; }
+    if (!ball || ball.r == null) { ball = { trail: [] }; balls = [ball]; trail = ball.trail; bricks = bricks || []; ball.r = Math.max(6, W * 0.022); ball.x = W / 2; ball.y = H / 2; ball.vx = 0; ball.vy = 0; ball.spin = 0; ball.rot = 0; }
     buildBg(themeOf(1));
     SFX.music.play('title');
     setTitle(true);
@@ -1318,8 +1339,26 @@
     SFX.init(); // iOSは画面に触れた時に音を有効化する必要がある
     if (paused || state === 'title' || state === 'stageClear') return;
     startDrag(e);
+    fingerDown = true;
     if (state === 'ready') { launch(); SFX.paddle(0.5, 0, 0); }
     else if (state === 'over' || state === 'allClear') openResult();
+  }
+  // 指を離した：吸着中のボールを弾く（その瞬間の擦り・振り上げも効く）
+  function releaseStuck() {
+    if (state !== 'play') return;
+    for (const b of balls) {
+      if (b.stuck == null) continue;
+      useBall(b);
+      b.stuck = null;
+      b.vx = 0; b.vy = b.stuckSpeed || H * CFG.speed;
+      releasing = true; hitPaddle(-1); releasing = false;
+    }
+    if (balls.length) useBall(balls[0]);
+  }
+  function onUp(e) {
+    if (e.touches && e.touches.length) return; // まだ別の指が触れている
+    fingerDown = false;
+    releaseStuck();
   }
   function onMove(e) {
     e.preventDefault();
@@ -1328,6 +1367,9 @@
   }
   cv.addEventListener('touchstart', onDown, { passive: false });
   cv.addEventListener('touchmove', onMove, { passive: false });
+  cv.addEventListener('touchend', onUp);
+  cv.addEventListener('touchcancel', onUp);
+  window.addEventListener('mouseup', onUp);
   cv.addEventListener('mousedown', onDown);
   cv.addEventListener('mousemove', e => { if (e.buttons) onMove(e); });
   window.addEventListener('resize', resize);
@@ -1445,7 +1487,7 @@
     if (particles.length) particles = particles.filter(p => p.life > 0);
     if (state === 'play') {
       // 記録は step() 内で行う
-    } else if (trail.length) trail = [];
+    } else for (const b of balls) if (b.trail) b.trail.length = 0;
   }
 
   function update(dt) {
@@ -1491,13 +1533,34 @@
     }
     if (state !== 'play') return;
 
-    const steps = Math.max(1, Math.ceil(speedOf() * dt / (ball.r * 0.8)));
-    const sdt = dt / steps;
-    for (let i = 0; i < steps && state === 'play'; i++) step(sdt);
+    for (const b of balls.slice()) {
+      if (b.dead || state !== 'play') continue;
+      useBall(b);
+      if (b.stuck != null) { // マグネットで吸着中：パドルと一緒に動く
+        b.x = Math.max(b.r, Math.min(W - b.r, paddle.x + b.stuck));
+        b.y = paddle.y - b.r;
+        continue;
+      }
+      const steps = Math.max(1, Math.ceil(speedOf() * dt / (ball.r * 0.8)));
+      const sdt = dt / steps;
+      for (let i = 0; i < steps && state === 'play' && !b.dead && b.stuck == null; i++) step(sdt);
+    }
+    if (state === 'play') balls = balls.filter(b => !b.dead);
+    if (balls.length) useBall(balls[0]);
   }
 
   // dir = -1：表で上へ打つ / +1：裏で下へ打つ（自爆の危険）
   function hitPaddle(dir) {
+    // マグネット：指を置いている間は表で受けたボールが吸着（指を離すと弾く）
+    if (dir < 0 && eff.magnet > 0 && fingerDown && !releasing) {
+      if (ball.extra) { setSpeed(Math.max(speedOf() - ball.extra, H * 0.05)); ball.extra = 0; }
+      ball.stuckSpeed = Math.max(speedOf(), H * CFG.speed);
+      ball.stuck = Math.max(-paddle.w / 2, Math.min(paddle.w / 2, ball.x - paddle.x));
+      ball.vx = 0; ball.vy = 0;
+      ball.y = paddle.y - ball.r;
+      SFX.magnet();
+      return;
+    }
     // 前の強打で上乗せされていた分は外して計算
     if (ball.extra) { setSpeed(Math.max(speedOf() - ball.extra, H * 0.05)); ball.extra = 0; }
     const drive = Math.max(0, dir * paddle.vy); // 打つ向きへ振る速さ（px/秒）
@@ -1666,14 +1729,20 @@
       SFX.wall(1);
     }
 
-    // 落下
+    // 落下：他にボールが残っていればミスにならない（そのボールが消えるだけ）
     if (ball.y - ball.r > H) {
+      if (balls.filter(b => !b.dead).length > 1) {
+        ball.dead = true;
+        for (let i = 0; i < 6 && particles.length < 140; i++) particles.push({ x: ball.x, y: H - 4, vx: (Math.random() - 0.5) * H * 0.4, vy: -Math.random() * H * 0.5, life: 0.4, max: 0.4, s: 3, color: '#ffffff' });
+        return;
+      }
+      ball.dead = true;
       lives--;
       // ミス（自分で下へ打ち込んだ自爆も同じ）：ドカーン＋破片
       SFX.selfDestruct();
       explode(ball.x, H - 4);
       feverGauge = 0;
-      if (lives <= 0) { state = 'over'; SFX.music.jingle('over'); } // 記録はタイトルへ戻る時（巻き戻しで復活できるように）
+      if (lives <= 0) { state = 'over'; SFX.music.jingle('over'); eff.magnet = 0; } // 記録はタイトルへ戻る時（巻き戻しで復活できるように）
       else resetBall();
     }
   }
@@ -1769,9 +1838,15 @@
     { id: 'slow',    label: 'SLOW',    color: '#7cff8a', w: 14 },
     { id: 'barrier', label: 'BARRIER', color: '#7df9ff', w: 18 },
     { id: 'oneup',   label: '1UP',     color: '#ffd23f', w: 10 },
+    { id: 'multi2',  label: '×2',      color: '#ffe66d', w: 14, mult: 2 },
+    { id: 'multi3',  label: '×3',      color: '#ffb84d', w: 9,  mult: 3 },
+    { id: 'multi5',  label: '×5',      color: '#ff8c42', w: 5,  mult: 5 },
+    { id: 'multi10', label: '×10',     color: '#ff5e5e', w: 2,  mult: 10 },
+    { id: 'magnet',  label: 'MAG',     color: '#b388ff', w: 10 },
+    { id: 'ghost',   label: '透明',    color: '#3a3f55', w: 8, text: '#9aa0b8' }, // ハズレ
   ];
   let items = [];
-  const eff = { wide: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0 }; // アイテム・毒の効果時間
+  const eff = { wide: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0 }; // アイテム・毒の効果時間
   function dropItem(b) {
     let r = Math.random() * ITEMS.reduce((a, it) => a + it.w, 0), it = ITEMS[0];
     for (const x of ITEMS) { r -= x.w; if (r <= 0) { it = x; break; } }
@@ -1789,22 +1864,52 @@
       }
       return true;
     });
-    for (const k of ['wide', 'power', 'poison']) if (eff[k] > 0) eff[k] = Math.max(0, eff[k] - dt);
+    for (const k of ['wide', 'power', 'poison', 'ghost']) if (eff[k] > 0) eff[k] = Math.max(0, eff[k] - dt);
   }
   function applyItem(it) {
-    const s0 = speedOf();
     if (it.id === 'wide') eff.wide = 15;
     if (it.id === 'power') eff.power = 12;
     if (it.id === 'barrier') eff.barrier = 1;
-    if (it.id === 'spin' && state === 'play') {
-      ball.spin = (Math.sign(ball.spin) || 1) * H * CFG.maxSpin;
-      setSpeed(Math.min(s0 * 1.15, H * CFG.maxSpeed));
+    if (it.id === 'magnet') eff.magnet = 1;  // 次のミスまで
+    if (it.id === 'ghost') eff.ghost = 6;    // ハズレ：6秒間パドルが見えない
+    if (state === 'play' && (it.id === 'spin' || it.id === 'slow')) {
+      for (const b of balls) {
+        if (b.stuck != null) continue;
+        useBall(b);
+        const s0 = speedOf();
+        if (it.id === 'spin') { b.spin = (Math.sign(b.spin) || 1) * H * CFG.maxSpin; setSpeed(Math.min(s0 * 1.15, H * CFG.maxSpeed)); }
+        else setSpeed(Math.max(H * CFG.speed, s0 * 0.75));
+      }
+      useBall(balls[0]);
     }
-    if (it.id === 'slow' && state === 'play') setSpeed(Math.max(H * CFG.speed, s0 * 0.75));
+    if (it.mult) multiplyBalls(it.mult);
     if (it.id === 'oneup') { lives = Math.min(99, lives + 1); SFX.oneUp(); }
+    else if (it.id === 'ghost') SFX.ghost();
     else SFX.item();
     addPopup(it.x, paddle.y - 24, it.label === '1UP' ? '1UP!' : it.label, it.color);
     score += 50;
+  }
+
+  // ボールを増やす：今あるボールそれぞれを k 倍に（少しずつ違う向きへ）
+  function multiplyBalls(k) {
+    if (state === 'ready') launch();
+    if (state !== 'play') return;
+    const add = [];
+    for (const b of balls) {
+      if (b.dead) continue;
+      const sp = Math.hypot(b.vx, b.vy), ang = Math.atan2(b.vy, b.vx);
+      for (let i = 1; i < k; i++) {
+        const nb = { ...b, trail: [] };
+        if (b.stuck != null) { nb.stuck = Math.max(-paddle.w / 2, Math.min(paddle.w / 2, b.stuck + (Math.random() - 0.5) * paddle.w * 0.6)); }
+        else {
+          const a = ang + (Math.random() - 0.5) * 1.2;
+          nb.vx = Math.cos(a) * sp; nb.vy = Math.sin(a) * sp;
+          if (Math.abs(nb.vy) < sp * 0.3) nb.vy = Math.sign(b.vy || -1) * sp * 0.3;
+        }
+        add.push(nb);
+      }
+    }
+    balls.push(...add);
   }
 
   // ---- 属性ギミック（毎フレーム） ----
@@ -2399,8 +2504,8 @@
       ctx.fillStyle = it.color;
       roundRect(it.x - iw / 2, it.y - ih / 2, iw, ih, ih / 2); ctx.fill();
       ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
-      ctx.fillStyle = '#0b1020';
-      ctx.font = `900 ${it.label.length > 4 ? 8 : 10}px -apple-system, sans-serif`;
+      ctx.fillStyle = it.text || '#0b1020';
+      ctx.font = `900 ${it.label.length > 4 ? 8 : 10}px -apple-system, "Hiragino Sans", sans-serif`;
       ctx.fillText(it.label, it.x, it.y + 0.5);
     }
     // 放電
@@ -2451,6 +2556,9 @@
     if (eff.power > 0) chips.push(['POW', eff.power, '#ff4d6d']);
     if (eff.poison > 0) chips.push(['毒', eff.poison, '#7cff3a']);
     if (eff.barrier > 0) chips.push(['BAR', 0, '#7df9ff']);
+    if (eff.magnet > 0) chips.push(['MAG', 0, '#b388ff']);
+    if (eff.ghost > 0) chips.push(['透明', eff.ghost, '#9aa0b8']);
+    if (balls.length > 1) chips.push([`●×${balls.length}`, 0, '#ffffff']);
     ctx.font = 'bold 10px -apple-system, sans-serif';
     chips.forEach(([label, t, col], i) => {
       const x = 10 + i * 46, y = boss ? top + 30 : top + 6;
@@ -2568,7 +2676,7 @@
     }
 
     // パドル（打った瞬間に光る）
-    if (paddleGlow > 0.02 && fx > 0) {
+    if (paddleGlow > 0.02 && fx > 0 && eff.ghost <= 0) {
       ctx.fillStyle = `rgba(120,220,255,${0.35 * paddleGlow * Math.min(fx, 1.5)})`;
       const g = paddle.h * 1.2 * paddleGlow;
       roundRect(paddle.x - paddle.w / 2 - g, paddle.y - g, paddle.w + g * 2, paddle.h + g * 2, paddle.h / 2 + g);
@@ -2576,12 +2684,21 @@
     }
     ctx.fillStyle = eff.stun > 0 ? (Math.sin(stageTime * 40) > 0 ? '#ffe14d' : '#9aa0b8') : paddleGlow > 0.5 ? '#ffffff' : '#e8ecff';
     if (eff.safe > 0) ctx.globalAlpha = Math.sin(stageTime * 25) > 0 ? 0.45 : 0.9; // 無敵中は点滅
+    if (eff.ghost > 0) ctx.globalAlpha = Math.max(0, 1 - eff.ghost); // 透明（最後の1秒で戻る）
+    if (eff.magnet > 0 && eff.ghost <= 0) { // マグネット中：両端が赤と青
+      ctx.save(); ctx.fillStyle = '#ff4d6d'; ctx.fillRect(paddle.x - paddle.w / 2, paddle.y - 3, 10, 3);
+      ctx.fillStyle = '#4dd8ff'; ctx.fillRect(paddle.x + paddle.w / 2 - 10, paddle.y - 3, 10, 3); ctx.restore();
+    }
     roundRect(paddle.x - paddle.w / 2, paddle.y, paddle.w, paddle.h, paddle.h / 2);
     ctx.fill();
     ctx.globalAlpha = 1;
 
 
-    if (state !== 'over' && state !== 'allClear') { drawTrail(); drawBall(); }
+    if (state !== 'over' && state !== 'allClear') {
+      // ボールが多い時はビームを先頭12個まで（重くならないように）
+      balls.forEach((b, i) => { useBall(b); if (i < 12) drawTrail(); drawBall(); });
+      if (balls.length) useBall(balls[0]);
+    }
 
 
 
@@ -2938,7 +3055,7 @@
   let history = [], rewinding = false, rewindSfxT = 0, lastPX = 0, lastPY = 0;
   function snapshot() {
     return {
-      ball: { ...ball }, px: paddle.x, py: paddle.y, pw: paddle.w,
+      balls: balls.map(b => ({ ...b, trail: null })), px: paddle.x, py: paddle.y, pw: paddle.w,
       br: bricks.map(b => [b.alive, b.hp, b.reviveT, b.revived]),
       score, lives, state, rally, chain, stageTime, windT, bossDone,
       items: items.map(i => ({ ...i })), eff: { ...eff }, fever, feverGauge,
@@ -2946,7 +3063,8 @@
     };
   }
   function restore(sn) {
-    Object.assign(ball, sn.ball);
+    balls = sn.balls.map(b => ({ ...b, trail: [] }));
+    useBall(balls[0]);
     paddle.x = paddle.prevX = sn.px; paddle.y = paddle.frameStartY = sn.py; paddle.w = sn.pw;
     paddle.vx = 0; paddle.vy = 0;
     targetX = sn.px; targetY = sn.py;
@@ -2959,7 +3077,6 @@
     boss = sn.boss ? { ...sn.boss } : null;
     shots = sn.shots.map(x => ({ ...x }));
     moveBricks(0);
-    trail = [];
     if (state === 'play' || state === 'ready') SFX.music.play(boss ? (stage === STAGES ? 'last' : 'boss') : 's' + stage);
     SFX.music.setFever(fever > 0);
   }
