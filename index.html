@@ -463,6 +463,7 @@
     liftDecay:  1.5,   // 強打で上がった速度が元に戻る速さ
     slowPower:  0.12,
     startLives: 5,     // ゲーム開始時の残機
+    sizeScale:  1,     // 実験：ボール・ブロック・パドルの大きさ（1, 1/2, 1/4, 1/8）
     sensX:      1.5,   // 横の感度（指の移動量に対するパドルの移動量）
     sensY:      1.5,   // 縦の感度  // 振り下げながら打った時の減速（1回で最大この割合だけ遅くなる）
     maxSpeed:   1.8,   // 最高速度（画面高さ/秒）
@@ -1118,26 +1119,30 @@
   }
 
   function layoutPaddle() {
-    paddle.w = W * CFG.paddleW;
-    paddle.h = Math.max(10, W * 0.035);
+    paddle.w = W * CFG.paddleW * sizeK();
+    paddle.h = Math.max(10, W * 0.035) * sizeK();
     paddle.baseY = H - safeBottom - paddle.h;      // 一番下（従来の位置）
     paddle.minY = Math.min(paddle.baseY, brickBottom + Math.max(12, W * 0.06)); // ブロックのすぐ下
     if (!CFG.vMove || paddle.y == null) paddle.y = paddle.baseY;
     paddle.y = Math.max(paddle.minY, Math.min(paddle.baseY, paddle.y));
     if (targetY == null || !CFG.vMove) targetY = paddle.y;
-    paddle.x = Math.min(Math.max(paddle.x, paddle.w / 2), W - paddle.w / 2);
+    paddle.x = Math.min(Math.max(paddle.x, -paddle.w / 2), W + paddle.w / 2);
   }
 
   let rowAmp = [];
   function layoutBricks() {
-    const gap = 3, side = 6;
-    const bw = (W - side * 2 - gap * (COLS - 1)) / COLS;
-    const bh = Math.max(12, H * 0.024);
+    const S = sizeK(), cols = colsInStage;
+    const gap = Math.max(0.5, 3 * S), side = 6;
+    const bw = (W - side * 2 - gap * (cols - 1)) / cols;
+    const bh = Math.max(12, H * 0.024) * S;
+    brickTop = top + 20; brickRowH = bh + gap;
+    bricksByRow = [];
     for (const b of bricks) {
       b.baseX = side + b.c * (bw + gap);
       b.x = b.baseX;
-      b.y = top + 20 + b.r * (bh + gap);
+      b.y = brickTop + b.r * brickRowH;
       b.w = bw; b.h = bh;
+      (bricksByRow[b.r] || (bricksByRow[b.r] = [])).push(b);
     }
     // 動く列：その列の空きスペースぶんだけ左右に揺れる
     rowAmp = [];
@@ -1145,7 +1150,7 @@
       if (!movingRows[r]) { rowAmp[r] = 0; continue; }
       const cs = bricks.filter(b => b.r === r).map(b => b.c);
       if (!cs.length) { rowAmp[r] = 0; continue; }
-      const left = Math.min(...cs), right = COLS - 1 - Math.max(...cs);
+      const left = Math.min(...cs), right = colsInStage - 1 - Math.max(...cs);
       rowAmp[r] = Math.min(left, right) * (bw + gap) + side * 0.5;
     }
     brickBottom = top + 20 + rowsInStage * (bh + gap);
@@ -1157,7 +1162,7 @@
     const sp = 0.7 + stage * 0.08;
     for (const b of bricks) {
       const a = rowAmp[b.r] || 0;
-      b.x = a ? b.baseX + Math.sin(stageTime * sp + b.r * 1.7) * a : b.baseX;
+      b.x = a ? b.baseX + Math.sin(stageTime * sp + (b.or ?? b.r) * 1.7) * a : b.baseX;
     }
   }
 
@@ -1193,24 +1198,36 @@
     return HP_BY_ROW[i] + (HP_BY_ROW[i + 1] - HP_BY_ROW[i]) * (x - i);
   }
   let rowsInStage = ROWS, movingRows = [];
+  // サイズを小さくすると、配置図の1マスを f×f 個の小さなブロックに分ける
+  const sizeK = () => CFG.sizeScale || 1;
+  const subdiv = () => Math.max(1, Math.round(1 / sizeK()));
+  let colsInStage = COLS, bricksByRow = [], brickTop = 0, brickRowH = 1;
   function makeBricks() {
     bricks = [];
-    const theme = themeOf(stage), k = hpScaleOf(stage);
+    const theme = themeOf(stage), k = hpScaleOf(stage), f = subdiv();
     const lay = LAYOUTS[theme.key];
-    rowsInStage = lay.length;
-    movingRows = lay.map(row => row.startsWith('>'));
-    lay.forEach((rowStr, r) => {
+    rowsInStage = lay.length * f;
+    colsInStage = COLS * f;
+    movingRows = [];
+    lay.forEach((rowStr, r0) => {
       const row = rowStr.startsWith('>') ? rowStr.slice(1) : rowStr;
-      const depth = rowsInStage > 1 ? r / (rowsInStage - 1) : 1;
+      const depth = lay.length > 1 ? r0 / (lay.length - 1) : 1;
       const colorIdx = Math.round(depth * (theme.blocks.length - 1));
-      for (let c = 0; c < COLS; c++) {
-        const t = row[c];
-        if (t === '.') continue;
-        let hp = hpAtDepth(depth) * k;
-        if (t === 'H') hp *= 2.5;
-        hp = Math.round(hp);
-        bricks.push({ r, c, type: t, alive: true, color: t === 'P' ? '#7cff3a' : theme.blocks[colorIdx],
-          hp, maxHp: hp, cracks: makeCracks(), hitT: 0, revived: false, reviveT: 0, lastHit: 0 });
+      for (let sr = 0; sr < f; sr++) {
+        const r = r0 * f + sr;
+        movingRows[r] = rowStr.startsWith('>');
+        for (let c0 = 0; c0 < COLS; c0++) {
+          let t = row[c0];
+          if (t === '.') continue;
+          for (let sc = 0; sc < f; sc++) {
+            const type = t === 'I' && (sr || sc) ? '1' : t; // ★は1マスにつき1個だけ
+            let hp = hpAtDepth(depth) * k * sizeK();       // 小さいブロックはHPも小さく
+            if (type === 'H') hp *= 2.5;
+            hp = Math.max(1, Math.round(hp));
+            bricks.push({ r, c: c0 * f + sc, or: r0, type, alive: true, color: type === 'P' ? '#7cff3a' : theme.blocks[colorIdx],
+              hp, maxHp: hp, cracks: makeCracks(), hitT: 0, revived: false, reviveT: 0, lastHit: 0 });
+          }
+        }
       }
     });
     layoutBricks();
@@ -1221,8 +1238,8 @@
     balls = [ball];
     trail = ball.trail;
     eff.magnet = 0; // マグネットはミスで解除
-    ball.r = Math.max(6, W * 0.022);
-    ball.x = paddle.x;
+    ball.r = Math.max(2, W * 0.022 * sizeK());
+    ball.x = Math.max(ball.r, Math.min(W - ball.r, paddle.x));
     ball.y = paddle.y - ball.r - 1;
     ball.vx = 0; ball.vy = 0;
     ball.spin = 0;
@@ -1280,7 +1297,7 @@
     if (!scoreSaved && score > 0) saveScore();
     state = 'title';
     if (!paddle) { paddle = { x: W / 2, vx: 0, prevX: W / 2, vy: 0, y: null }; layoutPaddle(); targetX = paddle.x; }
-    if (!ball || ball.r == null) { ball = { trail: [] }; balls = [ball]; trail = ball.trail; bricks = bricks || []; ball.r = Math.max(6, W * 0.022); ball.x = W / 2; ball.y = H / 2; ball.vx = 0; ball.vy = 0; ball.spin = 0; ball.rot = 0; }
+    if (!ball || ball.r == null) { ball = { trail: [] }; balls = [ball]; trail = ball.trail; bricks = bricks || []; ball.r = Math.max(2, W * 0.022 * sizeK()); ball.x = W / 2; ball.y = H / 2; ball.vx = 0; ball.vy = 0; ball.spin = 0; ball.rot = 0; }
     buildBg(themeOf(1));
     SFX.music.play('title');
     setTitle(true);
@@ -1323,7 +1340,7 @@
     lastPX = x; lastPY = y;
     // 横：端に着いたら基準点をずらし、戻す時にすぐ反応するようにする
     let tx = paddleStartX + (x - touchStartX) * CFG.sensX;
-    const minX = paddle.w / 2, maxX = W - paddle.w / 2;
+    const minX = -paddle.w / 2, maxX = W + paddle.w / 2; // 画面外へパドル1個分まで出られる
     const cx = Math.max(minX, Math.min(maxX, tx));
     if (cx !== tx) { paddleStartX -= (tx - cx); tx = cx; }
     targetX = tx;
@@ -1509,9 +1526,9 @@
     updateBoss(dt);
     updateShots(dt);
     // WIDE中は広がり、しびれ中は縮んで動きが鈍る
-    const wantW = W * CFG.paddleW * (eff.wide > 0 ? 1.5 : 1) * (eff.stun > 0 ? 0.7 : 1);
+    const wantW = W * CFG.paddleW * sizeK() * (eff.wide > 0 ? 1.5 : 1) * (eff.stun > 0 ? 0.7 : 1);
     paddle.w += (wantW - paddle.w) * Math.min(1, dt * 10);
-    const tx = Math.min(Math.max(targetX, paddle.w / 2), W - paddle.w / 2);
+    const tx = Math.min(Math.max(targetX, -paddle.w / 2), W + paddle.w / 2);
     paddle.x = eff.stun > 0 ? paddle.x + (tx - paddle.x) * Math.min(1, dt * 4) : tx;
     const instVx = (paddle.x - paddle.prevX) / Math.max(dt, 1e-3);
     paddle.vx += (instVx - paddle.vx) * 0.5;
@@ -1527,7 +1544,7 @@
     recordSwing();
 
     if (state === 'ready') {
-      ball.x = paddle.x;
+      ball.x = Math.max(ball.r, Math.min(W - ball.r, paddle.x)); // パドルが画面外でもボールは画面内
       ball.y = paddle.y - ball.r - 1;
       return;
     }
@@ -1675,8 +1692,11 @@
       hitPaddle(1);
     }
 
-    // ブロック
-    for (const b of bricks) {
+    // ブロック（ボールの高さにある段だけ調べる）
+    const ry0 = Math.max(0, Math.floor((ball.y - ball.r - brickTop) / brickRowH));
+    const ry1 = Math.min(rowsInStage - 1, Math.floor((ball.y + ball.r - brickTop) / brickRowH));
+    brickLoop:
+    for (let rr = ry0; rr <= ry1; rr++) for (const b of bricksByRow[rr] || []) {
       if (!b.alive) continue;
       const nx = Math.max(b.x, Math.min(ball.x, b.x + b.w));
       const ny = Math.max(b.y, Math.min(ball.y, b.y + b.h));
@@ -1693,14 +1713,14 @@
         const raw = fever > 0 ? 99999 : ballDamage();
         if (themeOf(stage).key === 'poison' && b.type === 'P') { eff.poison = 5; SFX.poisoned(); }
         const killed = damageBrick(b, raw, 'ball', power);
-        if (state !== 'play') break;
+        if (state !== 'play') break brickLoop;
         if (killed) continue; // 倒した：跳ね返らずに貫通
         // 倒せなかった：削って跳ね返る
         ball.x = nx + nX * ball.r;
         ball.y = ny + nY * ball.r;
         bounce(nX, nY, 'brickHit', b.r);
         spawnParticles(b, nX, nY, 0.3);
-        break;
+        break brickLoop;
       }
     }
 
@@ -1788,7 +1808,7 @@
     const s2 = speedOf() || 1;
     spawnParticles(b, -ball.vx / s2, -ball.vy / s2, 1);
     // アイテム：★ブロックは必ず、他は7%
-    if (b.type === 'I' || Math.random() < 0.07) dropItem(b);
+    if (b.type === 'I' || Math.random() < 0.07 * sizeK() * sizeK()) dropItem(b); // 小さいブロックは落ちにくく
     const key = themeOf(stage).key;
     if (key === 'bio' && !b.revived && Math.random() < 0.35) { b.reviveT = 7; }
     if (key === 'fire' && source !== 'fire') burn(b);
@@ -2594,9 +2614,17 @@
     drawCurrents();
     drawBoss();
 
+    const tiny = sizeK() < 0.5;
     for (const b of bricks) {
       if (!b.alive) continue;
       const ratio = b.hp / b.maxHp;
+      if (tiny) { // 小さいブロックは軽い描き方（四角＋削れ具合の暗さ＋被弾の光）
+        ctx.fillStyle = b.color; ctx.fillRect(b.x, b.y, b.w, b.h);
+        if (ratio < 1) { ctx.fillStyle = `rgba(0,0,0,${0.5 * (1 - ratio)})`; ctx.fillRect(b.x, b.y, b.w, b.h); }
+        if (b.type === 'H' || b.type === 'I') { ctx.fillStyle = b.type === 'I' ? '#ffffff' : 'rgba(255,255,255,0.55)'; ctx.fillRect(b.x + b.w * 0.3, b.y + b.h * 0.3, b.w * 0.4, b.h * 0.4); }
+        if (b.hitT > 0) { ctx.fillStyle = `rgba(255,255,255,${0.6 * b.hitT})`; ctx.fillRect(b.x, b.y, b.w, b.h); }
+        continue;
+      }
       ctx.fillStyle = b.color;
       roundRect(b.x, b.y, b.w, b.h, 3);
       ctx.fill();
@@ -2753,9 +2781,11 @@
     return body;
   }
   let curSection = sliderBox;
+  const sectionOf = {};
   for (const s of SLIDERS) {
     if (s.group) {
       curSection = makeSection(s.group, sliderBox);
+      sectionOf[s.group] = curSection;
       continue;
     }
     const row = document.createElement('div'); row.className = 'row';
@@ -2776,6 +2806,33 @@
     });
     inputs[s.key] = { input, show };
     curSection.appendChild(row);
+  }
+
+  // ---- 実験：サイズ切り替え（ボール・ブロック・パドル） ----
+  {
+    const wrap = document.createElement('div');
+    wrap.className = 'row';
+    wrap.innerHTML = '<div class="lab"><b>サイズ（実験）</b></div><div class="key">ボール・ブロック・パドル</div>';
+    const grid = document.createElement('div'); grid.className = 'stageBtns'; grid.style.gridTemplateColumns = 'repeat(4, 1fr)';
+    const opts = [[1, '1'], [0.5, '1/2'], [0.25, '1/4'], [0.125, '1/8']];
+    const btns = opts.map(([v, label]) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        applyChange('sizeScale', v); saveCfg(); mark();
+        if (state !== 'title') { // 今のステージを新しいサイズでやり直す
+          paddle.w = W * CFG.paddleW * sizeK();
+          loadStage(stage);
+          pausedByPanel = false; setPanel(false); setPaused(false);
+        }
+      });
+      grid.appendChild(b);
+      return [v, b];
+    });
+    const mark = () => btns.forEach(([v, b]) => { b.style.background = Math.abs(CFG.sizeScale - v) < 1e-6 ? '#3d6bff' : ''; });
+    mark();
+    wrap.appendChild(grid);
+    (sectionOf['基本'] || sliderBox).appendChild(wrap);
   }
 
   // ---- サウンドテスト ----
