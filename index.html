@@ -730,6 +730,17 @@
       Music.setup();
     }
 
+    // 画面から離れた時は音の処理ごと止める（iOSで裏に回っても鳴り続けないように）
+    function suspend() {
+      if (!ac) return;
+      try { if (navigator.audioSession) navigator.audioSession.type = 'auto'; } catch (e) {}
+      if (ac.state === 'running') ac.suspend();
+    }
+    function resume() {
+      if (!ac) return;
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+      if (ac.state !== 'running') ac.resume();
+    }
     function setVolume() {
       if (master) master.gain.value = CFG.muted ? 0 : CFG.volume;
     }
@@ -823,7 +834,7 @@
     const rallyPitch = (rally) => 1 + Math.min(rally, 16) * 0.025;
 
     return {
-      init, setVolume, music: Music,
+      init, setVolume, suspend, resume, music: Music,
       // power: 当たりの強さ 0〜1 / spin: 回転の強さ 0〜1
       paddle(power, spin, rally) {
         if (!ok('paddle', 40)) return;
@@ -3213,7 +3224,16 @@
   }
 
   // アプリ切替などで非表示になったら自動ポーズ
-  document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') setPaused(true); });
+  // ホーム画面に戻る・タブを切り替える・閉じる時：ゲームをポーズして音を完全に止める
+  function onHide() {
+    if (state === 'play' || state === 'ready') setPaused(true);
+    setRewind(false);
+    SFX.suspend();
+  }
+  function onShow() { SFX.resume(); } // 戻ってきたら音を再開（ゲームはポーズのまま。BGMはポーズ解除で再開）
+  document.addEventListener('visibilitychange', () => { if (document.hidden) onHide(); else onShow(); });
+  window.addEventListener('pagehide', onHide);
+  window.addEventListener('pageshow', e => { if (e.persisted) onShow(); });
 
   // 回転メーター
   const spinVal = document.getElementById('spinVal');
