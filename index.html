@@ -97,6 +97,19 @@
   .meter .bar { position: relative; height: 8px; background: rgba(255,255,255,0.12); border-radius: 4px; margin-top: 4px; }
   .meter .fill { position: absolute; top: 0; height: 100%; border-radius: 4px; }
   .meter .mid { position: absolute; left: 50%; top: -3px; width: 1px; height: 14px; background: rgba(255,255,255,0.6); }
+  .secHead {
+    display: flex; justify-content: space-between; align-items: center; width: 100%;
+    margin: 8px 0 4px; padding: 8px 8px; border: 0; border-radius: 8px;
+    background: rgba(255,255,255,0.08); color: #dfe6ff; font: bold 12px -apple-system, "Hiragino Sans", sans-serif;
+    touch-action: manipulation;
+  }
+  .secHead .arrow { color: #9aa6d6; font-size: 10px; white-space: nowrap; margin-left: 6px; }
+  .secHead span:first-child { text-align: left; }
+  .secBody { padding: 4px 2px 2px; }
+  .secBody.closed { display: none; }
+  .songBtns { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 6px; }
+  .songBtns button { padding: 7px 2px; border: 0; border-radius: 6px; background: #2b3560; color: #fff; font-size: 11px; }
+  .songBtns button.on { background: #3d6bff; }
   h3 { font-size: 11px; margin: 10px 0 4px; color: #9aa6d6; letter-spacing: .05em; }
   .row { margin-bottom: 8px; }
   .row .lab { display: flex; justify-content: space-between; gap: 4px; }
@@ -135,9 +148,12 @@
     <div class="btns">
       <button id="vMoveBtn">↕ 上下移動</button>
     </div>
-    <div class="btns"><button id="bossBtn">ボス戦へ（テスト用）</button></div>
-    <div class="lab" style="margin-bottom:4px">ステージへ移動（テスト用）</div>
-    <div class="stageBtns" id="stageBtns"></div>
+    <div id="testBox">
+      <div class="btns"><button id="bossBtn">ボス戦へ</button></div>
+      <div class="lab" style="margin-bottom:4px">ステージへ移動</div>
+      <div class="stageBtns" id="stageBtns"></div>
+    </div>
+    <div id="soundBox"></div>
     <div class="meter">
       <div class="lab">速度 <span id="speedVal">0</span></div>
       <div class="bar"><div class="fill" id="speedFill" style="left:0"></div><div class="mid" id="beamMark"></div></div>
@@ -639,6 +655,12 @@
       return {
         setup, play, stop, jingle, setVol,
         setFever(on) { fever = on; },
+        // サウンドテスト用：ポーズ中でも最初から鳴らす
+        preview(id) {
+          paused = false; setVol();
+          if (id.startsWith('j:')) { jingle(id.slice(2)); return; }
+          songId = null; play(id);
+        },
         pause(p) { paused = p; setVol(); if (!p && ac) nextT = ac.currentTime + 0.05; },
         current: () => songId,
       };
@@ -2548,12 +2570,37 @@
 
   // ---- 調整パネル ----
   const sliderBox = document.getElementById('sliders');
+  let soundTestBtns = [];
   const inputs = {};
   const decimals = step => (String(step).split('.')[1] || '').length;
 
+  // ---- カテゴリごとに「開く／閉じる」（開閉状態は端末に保存。最初は全部閉じる） ----
+  const OPEN_KEY = 'spinsmash-panel-open';
+  let openState = {};
+  try { openState = JSON.parse(localStorage.getItem(OPEN_KEY) || '{}'); } catch (e) {}
+  function makeSection(title, parent) {
+    const head = document.createElement('button');
+    head.className = 'secHead';
+    const body = document.createElement('div');
+    body.className = 'secBody';
+    const set = open => {
+      body.classList.toggle('closed', !open);
+      head.innerHTML = `<span>${title}</span><span class="arrow">${open ? '▼ 閉じる' : '▶ 開く'}</span>`;
+    };
+    set(!!openState[title]);
+    head.addEventListener('click', () => {
+      const open = body.classList.contains('closed');
+      set(open);
+      openState[title] = open;
+      try { localStorage.setItem(OPEN_KEY, JSON.stringify(openState)); } catch (e) {}
+    });
+    parent.appendChild(head); parent.appendChild(body);
+    return body;
+  }
+  let curSection = sliderBox;
   for (const s of SLIDERS) {
     if (s.group) {
-      const h = document.createElement('h3'); h.textContent = s.group; sliderBox.appendChild(h);
+      curSection = makeSection(s.group, sliderBox);
       continue;
     }
     const row = document.createElement('div'); row.className = 'row';
@@ -2573,8 +2620,36 @@
       saveCfg();
     });
     inputs[s.key] = { input, show };
-    sliderBox.appendChild(row);
+    curSection.appendChild(row);
   }
+
+  // ---- サウンドテスト ----
+  {
+    const box = makeSection('サウンドテスト', sliderBox);
+    const list = [['title', 'タイトル']];
+    for (let n = 1; n <= STAGES; n++) list.push(['s' + n, `${n} ${themeOf(n).name}`]);
+    list.push(['boss', 'ボス'], ['last', 'ラスボス'], ['j:clear', 'クリア'], ['j:over', 'ゲームオーバー'], ['j:allclear', 'オールクリア']);
+    const grid = document.createElement('div'); grid.className = 'songBtns';
+    const btns = [];
+    for (const [id, label] of list) {
+      const b = document.createElement('button');
+      b.textContent = '♪ ' + label;
+      b.addEventListener('click', () => {
+        SFX.init();
+        SFX.music.preview(id);
+        btns.forEach(x => x.classList.toggle('on', x === b && !id.startsWith('j:')));
+      });
+      btns.push(b); grid.appendChild(b);
+    }
+    const stop = document.createElement('button');
+    stop.textContent = '■ 停止';
+    stop.addEventListener('click', () => { SFX.music.stop(); btns.forEach(x => x.classList.remove('on')); });
+    grid.appendChild(stop);
+    box.appendChild(grid);
+    soundTestBtns = btns;
+  }
+  // ---- テスト用（ボス戦・ステージ移動） ----
+  makeSection('テスト用', sliderBox).appendChild(document.getElementById('testBox'));
 
   // 値の変更をプレイ中のボール・パドルへ即反映
   function applyChange(key, v) {
@@ -2606,6 +2681,13 @@
     gearBtn.classList.toggle('on', open);
     if (open && !paused) { setPaused(true); pausedByPanel = true; }
     if (!open && pausedByPanel) { setPaused(false); pausedByPanel = false; }
+    if (!open) { // サウンドテストのあと、今の場面の曲に戻す
+      soundTestBtns.forEach(x => x.classList.remove('on'));
+      if (state === 'title') SFX.music.play('title');
+      else if (state === 'play' || state === 'ready') SFX.music.play(boss ? (stage === STAGES ? 'last' : 'boss') : 's' + stage);
+      else SFX.music.stop();
+      SFX.music.pause(paused);
+    }
   }
   gearBtn.addEventListener('click', () => { SFX.init(); setPanel(!panelOpen); });
 
