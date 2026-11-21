@@ -2701,6 +2701,7 @@
 
   // コックピットの窓：黄色（ボールの赤・水色と色も明るさも違う）＋黒い縁取り＋横長の形
   // 色弱の人にも見分けやすい配色（Okabe-Ito の黄色）。透明中は両側に ◀ ▶ の印
+  const SHOW_GHOST_MARKS = false;
   function drawCockpitWindow(x, cy, cw, ch, ghost) {
     const ww = Math.max(8, cw * 0.42), wh = Math.max(4, ch * 0.62);
     ctx.save();
@@ -2710,8 +2711,9 @@
     ctx.lineWidth = 1.5;
     roundRect(x - ww / 2, cy - wh / 2, ww, wh, wh / 2);
     ctx.fill(); ctx.stroke();
-    if (ghost) {
-      const s = Math.max(6, wh * 1.5), gx = ww / 2 + 3; // 窓を指す矢印（▶ 窓 ◀）
+    // 透明中に窓を指す矢印（▶ 窓 ◀）を出す場合は SHOW_GHOST_MARKS を true に（今は一旦なし）
+    if (ghost && SHOW_GHOST_MARKS) {
+      const s = Math.max(6, wh * 1.5), gx = ww / 2 + 3;
       ctx.fillStyle = '#F0E442';
       ctx.lineWidth = 1;
       for (const d of [-1, 1]) {
