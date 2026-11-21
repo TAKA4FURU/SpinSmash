@@ -50,6 +50,23 @@
   #rankList li .sc { flex: 1; font-weight: bold; }
   #rankList li .meta { color: #9aa6d6; font-size: 12px; }
   .rankBox button { padding: 10px 28px; border: 0; border-radius: 10px; background: #2b3560; color: #fff; font-size: 14px; }
+  .tabs { display: flex; gap: 6px; margin: 8px 0; }
+  .tabs button { flex: 1; padding: 8px 0; border: 0; border-radius: 8px; background: #2b3560; color: #fff; font-size: 13px; }
+  .tabs button.on { background: linear-gradient(90deg, #ff4d6d, #4dd8ff); font-weight: bold; }
+  #rankList li .nm { width: 6.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #resultUI { position: fixed; inset: 0; z-index: 45; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
+  .resScore { font-size: 15px; margin: 6px 0 12px; line-height: 1.6; }
+  .resScore b { font-size: 26px; }
+  #nameInput {
+    width: 100%; box-sizing: border-box; padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.25);
+    background: #0b1020; color: #fff; font-size: 16px; text-align: center;
+    -webkit-user-select: text; user-select: text; touch-action: auto;
+  }
+  .resBtns { display: flex; gap: 8px; margin: 10px 0 6px; }
+  .resBtns button, #resOk { flex: 1; padding: 12px 0; border: 0; border-radius: 10px; color: #fff; font-size: 14px; font-weight: bold;
+    background: linear-gradient(90deg, #ff4d6d, #4dd8ff); }
+  .resBtns button.sub { background: #2b3560; font-weight: normal; }
+  #resOk { width: 100%; margin-top: 8px; }
   .stageBtns { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-bottom: 8px; }
   .stageBtns button { padding: 6px 0; border: 0; border-radius: 6px; background: #2b3560; color: #fff; font-size: 12px; }
 
@@ -129,9 +146,22 @@
   <div id="rankUI" class="hidden">
     <div class="rankBox">
       <h2>ランキング</h2>
-      <div class="note">この端末での記録（他のプレイヤーとのランキングは準備中）</div>
+      <div class="tabs"><button id="tabAll" class="on">みんな</button><button id="tabMine">この端末</button></div>
+      <div class="note" id="rankNote"></div>
       <ol id="rankList"></ol>
       <button id="rankClose">とじる</button>
+    </div>
+  </div>
+  <div id="resultUI" class="hidden">
+    <div class="rankBox">
+      <h2 id="resTitle">GAME OVER</h2>
+      <div class="resScore" id="resScore"></div>
+      <div id="resForm">
+        <input id="nameInput" maxlength="10" placeholder="なまえ（10文字まで）" autocomplete="nickname" enterkeyhint="send">
+        <div class="resBtns"><button id="sendBtn">ランキングに送信</button><button id="skipBtn" class="sub">送信しない</button></div>
+      </div>
+      <div class="note" id="resNote"></div>
+      <button id="resOk" class="hidden">タイトルへ</button>
     </div>
   </div>
   <button id="rewindBtn" aria-label="巻き戻し" class="hidden">⏪</button>
@@ -179,6 +209,8 @@
   const BALL_COLOR_A = '#ff4d6d';
   const BALL_COLOR_B = '#4dd8ff';
   const STAGES = 10;
+  // オンラインランキングの送信先（Google Apps Script のウェブアプリURL）。空なら端末内のみ
+  const RANKING_URL = '';
 
   // ---- ステージのテーマ（属性） ----
   // bg: 背景の基本色（上下同色→中央色で継ぎ目なくループ）、blocks: 上の段→下の段の色、paint: 背景の模様
@@ -1211,8 +1243,14 @@
     banner = { text: `STAGE ${n}`, sub: t.name, color: t.accent, life: 2.2 };
   }
 
+  // ランキングに送れるのは、遊びに関わる設定が初期値のままのプレイだけ（巻き戻しはOK）
+  const FREE_KEYS = ['volume', 'bgmVol', 'muted', 'fx', 'bgSpeed', 'sensX', 'sensY', 'vMove', 'cfgVer'];
+  const isDefaultPlay = () => Object.keys(DEFAULTS).every(k => FREE_KEYS.includes(k) || Math.abs(Number(CFG[k]) - Number(DEFAULTS[k])) < 1e-6);
+  let rankedRun = true;
+
   function newGame(startStage) {
     score = 0; lives = Math.round(CFG.startLives) || LIVES; bestRally = 0; scoreSaved = false;
+    rankedRun = isDefaultPlay() && (startStage || 1) === 1;
     setTitle(false);
     loadStage(startStage || 1);
   }
@@ -1227,14 +1265,14 @@
     setTitle(true);
   }
 
-  // ---- 端末内ランキング（オンラインは段階⑤で追加） ----
+  // ---- 端末内の記録（オンラインは RANKING_URL へ送信） ----
   const SCORE_KEY = 'spinsmash-scores';
   function loadScores() { try { return JSON.parse(localStorage.getItem(SCORE_KEY) || '[]'); } catch (e) { return []; } }
   function saveScore() {
     scoreSaved = true;
     const list = loadScores();
     const d = new Date();
-    list.push({ score, stage, rally: bestRally, date: `${d.getMonth() + 1}/${d.getDate()}` });
+    list.push({ score, stage, rally: bestRally, ranked: rankedRun, date: `${d.getMonth() + 1}/${d.getDate()}` });
     list.sort((a, b) => b.score - a.score);
     try { localStorage.setItem(SCORE_KEY, JSON.stringify(list.slice(0, 10))); } catch (e) {}
   }
@@ -1281,7 +1319,7 @@
     if (paused || state === 'title' || state === 'stageClear') return;
     startDrag(e);
     if (state === 'ready') { launch(); SFX.paddle(0.5, 0, 0); }
-    else if (state === 'over' || state === 'allClear') goTitle();
+    else if (state === 'over' || state === 'allClear') openResult();
   }
   function onMove(e) {
     e.preventDefault();
@@ -2653,6 +2691,7 @@
 
   // 値の変更をプレイ中のボール・パドルへ即反映
   function applyChange(key, v) {
+    if (state !== 'title' && !FREE_KEYS.includes(key)) rankedRun = false; // プレイ中に設定を変えたら参考記録
     const old = CFG[key];
     CFG[key] = v;
     if (key === 'paddleW' && paddle) layoutPaddle();
@@ -2746,19 +2785,100 @@
     if (show) rankUI.classList.add('hidden');
   }
   document.getElementById('startBtn').addEventListener('click', () => { SFX.init(); newGame(1); });
+  // ---- ランキング画面（みんな＝オンライン／この端末） ----
+  const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const rankList = document.getElementById('rankList'), rankNote = document.getElementById('rankNote');
+  const tabAll = document.getElementById('tabAll'), tabMine = document.getElementById('tabMine');
+  async function showRanking(tab) {
+    tabAll.classList.toggle('on', tab === 'all'); tabMine.classList.toggle('on', tab === 'mine');
+    if (tab === 'mine') {
+      const list = loadScores();
+      rankNote.textContent = 'この端末での記録（「参考」は設定を変えたプレイ）';
+      rankList.innerHTML = list.length
+        ? list.map((r, i) => `<li><span class="no">${i + 1}</span><span class="sc">${r.score}</span><span class="meta">STAGE ${r.stage}・${r.date}${r.ranked === false ? '・参考' : ''}</span></li>`).join('')
+        : '<li><span class="meta">まだ記録がありません</span></li>';
+      return;
+    }
+    if (!RANKING_URL) { rankNote.textContent = 'オンラインランキングは準備中です'; rankList.innerHTML = ''; return; }
+    rankNote.textContent = '読み込み中…'; rankList.innerHTML = '';
+    try {
+      const res = await fetch(RANKING_URL);
+      const data = await res.json();
+      if (!tabAll.classList.contains('on')) return;
+      rankNote.textContent = '上位50件';
+      rankList.innerHTML = data.top && data.top.length
+        ? data.top.map((r, i) => `<li><span class="no">${i + 1}</span><span class="nm">${esc(r.name)}</span><span class="sc">${r.score}</span><span class="meta">ST${r.stage}・${esc(r.date)}</span></li>`).join('')
+        : '<li><span class="meta">まだ記録がありません</span></li>';
+    } catch (e) {
+      rankNote.textContent = '読み込めませんでした（通信を確認してください）';
+    }
+  }
+  tabAll.addEventListener('click', () => showRanking('all'));
+  tabMine.addEventListener('click', () => showRanking('mine'));
   document.getElementById('rankBtn').addEventListener('click', () => {
     SFX.init();
-    const list = loadScores();
-    document.getElementById('rankList').innerHTML = list.length
-      ? list.map((r, i) => `<li><span class="no">${i + 1}</span><span class="sc">${r.score}</span><span class="meta">STAGE ${r.stage}・${r.date}</span></li>`).join('')
-      : '<li><span class="meta">まだ記録がありません</span></li>';
     rankUI.classList.remove('hidden');
+    showRanking('all');
   });
+
+  // ---- ゲーム終了時：名前を入れてランキングに送信 ----
+  const NAME_KEY = 'spinsmash-name';
+  const resultUI = document.getElementById('resultUI'), resNote = document.getElementById('resNote');
+  const resForm = document.getElementById('resForm'), resOk = document.getElementById('resOk');
+  const nameInput = document.getElementById('nameInput'), sendBtn = document.getElementById('sendBtn'), skipBtn = document.getElementById('skipBtn');
+  function openResult() {
+    if (!scoreSaved) saveScore();
+    const cleared = state === 'allClear';
+    state = 'result';
+    document.getElementById('resTitle').textContent = cleared ? 'ALL CLEAR!!' : 'GAME OVER';
+    document.getElementById('resScore').innerHTML = `SCORE <b>${score}</b><br>STAGE ${stage}・最高 ${bestRally} ラリー`;
+    resNote.textContent = '';
+    resOk.classList.add('hidden');
+    sendBtn.disabled = skipBtn.disabled = false;
+    const canSend = RANKING_URL && rankedRun && score > 0;
+    resForm.classList.toggle('hidden', !canSend);
+    if (!canSend) {
+      resNote.textContent = !RANKING_URL ? 'オンラインランキングは準備中です（この端末に記録しました）'
+        : !rankedRun ? '設定を変えたプレイのため、ランキングには送れません（この端末に参考記録として保存しました）'
+        : '';
+      resOk.classList.remove('hidden');
+    } else {
+      try { nameInput.value = localStorage.getItem(NAME_KEY) || ''; } catch (e) {}
+    }
+    resultUI.classList.remove('hidden');
+  }
+  function closeResult() { resultUI.classList.add('hidden'); goTitle(); }
+  async function sendScore() {
+    const name = nameInput.value.trim().slice(0, 10);
+    if (!name) { resNote.textContent = '名前を入れてください'; nameInput.focus(); return; }
+    try { localStorage.setItem(NAME_KEY, name); } catch (e) {}
+    nameInput.blur();
+    sendBtn.disabled = skipBtn.disabled = true;
+    resNote.textContent = '送信中…';
+    try {
+      // text/plain で送る（Apps Script の受け口で事前確認なしに受け取れる形式）
+      const res = await fetch(RANKING_URL, { method: 'POST', body: JSON.stringify({ name, score, stage, rally: bestRally }) });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      resNote.textContent = `${data.rank}位にランクイン！`;
+      resForm.classList.add('hidden');
+      resOk.classList.remove('hidden');
+      SFX.music.jingle('clear');
+    } catch (e) {
+      resNote.textContent = '送信できませんでした。通信を確認してもう一度お試しください';
+      sendBtn.disabled = skipBtn.disabled = false;
+    }
+  }
+  sendBtn.addEventListener('click', sendScore);
+  nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendScore(); });
+  skipBtn.addEventListener('click', closeResult);
+  resOk.addEventListener('click', closeResult);
   document.getElementById('rankClose').addEventListener('click', () => rankUI.classList.add('hidden'));
 
   // テスト用：ブロックを全部消してボス戦へ
   document.getElementById('bossBtn').addEventListener('click', () => {
     if (state === 'title') newGame(stage);
+    rankedRun = false;
     for (const b of bricks) { b.alive = false; b.reviveT = 0; }
     if (!boss) spawnBoss();
     if (state === 'ready') launch();
@@ -2772,6 +2892,7 @@
     b.textContent = n;
     b.addEventListener('click', () => {
       if (state === 'title') newGame(n); else loadStage(n);
+      rankedRun = false;
       pausedByPanel = false; setPanel(false); setPaused(false);
     });
     stageBtns.appendChild(b);
