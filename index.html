@@ -658,9 +658,9 @@
         s7:     { root: 59, mode: 'minor',      bpm: 150, prog: [1, 6, 3, 7, 1, 6, 4, 5], lead: 0.125, bass: 'oct',   drums: 'half',  arp: true,  seed: 87 },
         s8:     { root: 61, mode: 'phrygian',   bpm: 138, prog: [1, 2, 1, 2, 7, 6, 2, 1], lead: 0.25,  bass: 'walk',  drums: 'half',  arp: false, seed: 98 },
         s9:     { root: 52, mode: 'minor',      bpm: 165, prog: [1, 1, 6, 7, 1, 1, 4, 5], lead: 0.5,   bass: 'drive', drums: 'march', arp: false, seed: 109 },
-        s10:    { root: 54, mode: 'harmonic',   bpm: 160, prog: [1, 6, 4, 5, 1, 6, 2, 5], lead: 0.25,  bass: 'drive', drums: 'rock',  arp: true,  seed: 120 },
+        s10:    { custom: 'choir', bpm: 100, verb: 0.45 }, // せいぶつ：荘厳な混成合唱（オリジナル曲）
         boss:   { root: 48, mode: 'minor',      bpm: 176, prog: [1, 1, 6, 6, 4, 4, 5, 5], lead: 0.5,   bass: 'drive', drums: 'rock',  arp: true,  seed: 131 },
-        last:   { root: 58, mode: 'harmonic',   bpm: 182, prog: [1, 6, 4, 5, 1, 6, 7, 5], lead: 0.25,  bass: 'drive', drums: 'four',  arp: true,  seed: 142 },
+        last:   { custom: 'sutra', bpm: 120, verb: 0.4 },  // ラスボス：お経・木魚・りんの静かな緊張感
       };
       const JINGLES = { // [MIDI, 16分音符の長さ]
         clear:    { bpm: 150, lead: [[72, 2], [76, 2], [79, 2], [84, 6], [83, 2], [84, 10]], bass: [[48, 8], [55, 8], [48, 8]] },
@@ -788,8 +788,136 @@
         return { lead, bass, chords };
       }
 
+      // ---- 声の合成：ノコギリ波を数本ずらして重ね（合唱）、母音の響き（フォルマント）を3つのフィルターで作る ----
+      const VOWELS = { // [周波数, 強さ] ×3（男声の目安）
+        a: [[730, 1], [1090, 0.5], [2440, 0.22]], o: [[570, 1], [840, 0.45], [2410, 0.15]],
+        u: [[300, 1], [870, 0.3], [2240, 0.1]],   e: [[530, 1], [1840, 0.4], [2480, 0.2]],
+        i: [[270, 1], [2290, 0.35], [3010, 0.2]],
+      };
+      function vox(m, t, dur, vol, vowel, opt) {
+        if (!m) return;
+        opt = opt || {};
+        const n = opt.voices || 3, fs = opt.female ? 1.17 : 1;
+        const sum = ac.createGain(); sum.gain.value = 1 / n;
+        const env = ac.createGain();
+        const a = opt.attack ?? 0.08, r = opt.release ?? 0.2;
+        env.gain.setValueAtTime(0.0001, t);
+        env.gain.linearRampToValueAtTime(vol, t + a);
+        env.gain.setValueAtTime(vol, Math.max(t + a, t + dur - r));
+        env.gain.linearRampToValueAtTime(0.0001, t + dur);
+        for (const [f, amp] of VOWELS[vowel]) {
+          const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f * fs; bp.Q.value = f * fs / 90;
+          const g = ac.createGain(); g.gain.value = amp * 3;
+          sum.connect(bp); bp.connect(g); g.connect(env);
+        }
+        let out = env;
+        if (opt.pan && ac.createStereoPanner) { const p = ac.createStereoPanner(); p.pan.value = opt.pan; env.connect(p); out = p; }
+        out.connect(opt.dest || bus);
+        const lfo = ac.createOscillator(), lg = ac.createGain();
+        lfo.frequency.value = 4.8 + Math.random(); lg.gain.value = opt.vib ?? 14;
+        lfo.connect(lg);
+        for (let i = 0; i < n; i++) {
+          const o = ac.createOscillator(); o.type = 'sawtooth';
+          o.frequency.value = freq(m);
+          o.detune.value = (Math.random() - 0.5) * (opt.spread ?? 22);
+          lg.connect(o.detune); o.connect(sum);
+          o.start(t); o.stop(t + dur + 0.05);
+        }
+        lfo.start(t); lfo.stop(t + dur + 0.05);
+      }
+      // ティンパニ
+      function timp(m, t, vol) {
+        const o = ac.createOscillator(), g = ac.createGain();
+        o.frequency.setValueAtTime(freq(m) * 1.05, t); o.frequency.exponentialRampToValueAtTime(freq(m), t + 0.08);
+        g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
+        o.connect(g); g.connect(bus); o.start(t); o.stop(t + 1.15);
+        nz(t, 0.08, vol * 0.6, 'lowpass', 600, 0.7, bus);
+      }
+      // 木魚（ポク）
+      function mokugyo(t, vol) {
+        nz(t, 0.025, vol, 'bandpass', 1300, 3, bus);
+        const o = ac.createOscillator(), g = ac.createGain();
+        o.frequency.setValueAtTime(880, t); o.frequency.exponentialRampToValueAtTime(700, t + 0.05);
+        g.gain.setValueAtTime(vol * 0.7, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+        o.connect(g); g.connect(bus); o.start(t); o.stop(t + 0.08);
+      }
+      // りん（鉢の鐘）：うなりのある倍音が長く響く
+      function rin(t, vol) {
+        for (const [f, a, d] of [[680, 1, 5], [683, 0.6, 5], [1875, 0.45, 3.5], [3610, 0.2, 2.2], [5390, 0.08, 1.4]]) {
+          const o = ac.createOscillator(), g = ac.createGain(); o.type = 'sine'; o.frequency.value = f;
+          g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol * a, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+          o.connect(g); g.connect(bus); o.start(t); o.stop(t + d + 0.05);
+        }
+      }
+
+      // ===== せいぶつ：荘厳な混成合唱（ニ短調、8小節。前半は静かな男声、後半は全員で爆発） =====
+      const CH = { // 和音の声部（低音・男声・女声）
+        Dm: { low: 38, male: [50, 57], fem: [62, 65, 69] }, Gm: { low: 43, male: [50, 55], fem: [62, 67, 70] },
+        Bb: { low: 46, male: [50, 53], fem: [62, 65, 70] }, A:  { low: 45, male: [52, 57], fem: [61, 64, 69] },
+      };
+      const CHOIR_BARS = ['Dm', 'Dm', 'Bb', 'A', 'Dm', 'Gm', 'Bb', 'A'];
+      const CHOIR_MEL = [[69, 69, 69, 70], [70, 69, 67, 69], [70, 70, 72, 74], [73, 73, 73, 69]]; // 後半のソプラノ（拍ごと）
+      const cvox = (m, t, d, v, w, o) => vox(m, t, d, v * 1.3, w, o); // 合唱は少し大きめに
+      function choirStep(st, t, six) {
+        const bar = Math.floor(st / 16), k = st % 16, c = CH[CHOIR_BARS[bar]], beat = six * 4;
+        if (bar < 4) { // 前半：静かに。男声の「オー」と弦の刻み
+          if (k === 0) {
+            c.male.forEach((m, i) => cvox(m, t, six * 16, 0.07, 'o', { attack: 0.5, release: 0.6, pan: i ? 0.3 : -0.3 }));
+            voice('sawtooth', c.low, t, six * 16, 0.05, { lp: 500, attack: 0.4, sus: 0.95, dest: bus });
+            timp(c.low + 12, t, 0.35);
+          }
+          if (k % 2 === 0) voice('sawtooth', c.fem[(k / 2) % 3] - 12, t, six * 1.5, fever ? 0.035 : 0.022, { lp: 1600, detune: k % 4 ? 6 : -6, pan: k % 4 ? 0.4 : -0.4, dest: bus });
+          if (bar === 3 && k >= 12) timp(c.low + 12, t, 0.18 + (k - 12) * 0.06); // 爆発前のロール
+          if (bar === 3 && k >= 8 && k % 2 === 1) timp(c.low + 12, t, 0.12 + (k - 8) * 0.03);
+        } else { // 後半：全員で。拍ごとに和音を力強く
+          if (k === 0 && bar === 4) drum('C', t);
+          if (k % 4 === 0) {
+            const mel = CHOIR_MEL[bar - 4][k / 4];
+            c.male.forEach((m, i) => cvox(m, t, beat * 0.92, 0.075, 'a', { attack: 0.03, release: 0.12, pan: i ? 0.35 : -0.35 }));
+            c.fem.forEach((m, i) => cvox(m, t, beat * 0.92, 0.05, 'a', { female: true, attack: 0.03, release: 0.12, pan: (i - 1) * 0.5 }));
+            cvox(mel, t, beat * 0.95, 0.09, 'a', { female: true, voices: 4, attack: 0.02, release: 0.1 });
+            cvox(c.low + 12, t, beat * 0.92, 0.07, 'o', { voices: 2, attack: 0.02, release: 0.1 });
+            timp(c.low + 12, t, k === 0 ? 0.75 : 0.45);
+            voice('sawtooth', c.low, t, beat * 0.9, 0.08, { lp: 700, attack: 0.01, dest: bus });
+          }
+          if (k % 2 === 0 || fever) voice('sawtooth', c.fem[(k >> 1) % 3], t, six * 1.4, 0.03, { lp: 2600, detune: k % 4 ? 7 : -7, pan: k % 4 ? 0.45 : -0.45, dest: bus });
+        }
+      }
+
+      // ===== ラスボス：お経（静かな緊張感）。木魚に合わせて1拍1音で唱え、低い唸りが続く =====
+      const SUTRA_VOWELS = 'aaaoaiau' + 'aoaieaua' + 'aaaoauai' + 'oaueaioo'; // 32音（4拍×8小節）
+      function sutraStep(st, t, six) {
+        const bar = Math.floor(st / 16), k = st % 16, beat = six * 4;
+        if (st === 0) { // 8小節ぶん続く低い唸り（ん〜）と、遠くで鳴る高い音
+          vox(38, t, six * 128, 0.08, 'u', { voices: 2, attack: 1.2, release: 1.5, vib: 4 });
+          vox(45, t, six * 128, 0.04, 'u', { voices: 2, attack: 2, release: 1.5, vib: 4 });
+          const o = ac.createOscillator(), g = ac.createGain(), l = ac.createOscillator(), lg = ac.createGain();
+          o.frequency.value = freq(86); l.frequency.value = 0.3; lg.gain.value = 0.006; l.connect(lg); lg.connect(g.gain);
+          g.gain.value = 0.008; o.connect(g); g.connect(bus); o.start(t); o.stop(t + six * 128); l.start(t); l.stop(t + six * 128);
+        }
+        if (k === 0 && bar % 4 === 0) rin(t, 0.22);
+        if (k === 0 && bar % 2 === 0) { // 心音のような低い太鼓
+          const o = ac.createOscillator(), g = ac.createGain();
+          o.frequency.setValueAtTime(62, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.3);
+          g.gain.setValueAtTime(0.45, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+          o.connect(g); g.connect(bus); o.start(t); o.stop(t + 0.5);
+        }
+        if (k % 4 === 0) {
+          const idx = bar * 4 + k / 4, v = SUTRA_VOWELS[idx];
+          const end = idx % 8 === 7;                                // 句の終わりは少し下がって伸ばす
+          const m = end ? 48 : 50;
+          mokugyo(t, idx % 4 === 0 ? 0.7 : 0.5);
+          if (idx % 2 === 0) nz(t, 0.03, 0.05, 'bandpass', 2600, 1.5, bus); // 子音（か・さ）の息
+          vox(m, t, beat * (end ? 0.98 : 0.85), 0.26, v, { voices: 4, attack: 0.03, release: 0.12, vib: 3, spread: 16 });
+          vox(m - 12, t, beat * (end ? 0.98 : 0.85), 0.09, v, { voices: 2, attack: 0.03, release: 0.12, vib: 2 });
+        }
+        if (fever && k % 4 === 2) mokugyo(t, 0.25); // フィーバー中は木魚が倍に
+      }
+      const CUSTOM = { choir: choirStep, sutra: sutraStep };
+
       function playStep(st, t, six) {
         const sp = SONGS[songId];
+        if (sp.custom) { CUSTOM[sp.custom](st, t, six); return; }
         const l = song.lead[st], b = song.bass[st], k = st % 16, bar = Math.floor(st / 16);
         const ch = song.chords[bar];
         if (l) { // メロディ：2本を少しずらして左右に（厚み）＋ビブラート
@@ -834,7 +962,8 @@
       function play(id) {
         if (!ac || !bus) { pendingId = id; return; }
         if (songId === id && song) return;
-        songId = id; song = compose(SONGS[id]); step = 0;
+        songId = id; song = SONGS[id].custom ? {} : compose(SONGS[id]); step = 0;
+        if (musSend) musSend.gain.value = SONGS[id].verb || 0.22; // 曲ごとの残響の深さ
         nextT = ac.currentTime + 0.05;
         if (!timer) timer = setInterval(tick, 25);
       }
