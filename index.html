@@ -3328,7 +3328,13 @@
       // text/plain で送る（Apps Script の受け口で事前確認なしに受け取れる形式）
       const res = await fetch(RANKING_URL, { method: 'POST', body: JSON.stringify({ name, score, stage, rally: bestRally }) });
       const data = await res.json();
-      if (!data.ok) throw new Error(data.error);
+      if (!data.ok) { // サーバーが受け付けなかった（スコアの上限など）
+        resNote.textContent = data.error === 'invalid'
+          ? 'この記録はランキングの受付範囲外でした（スプレッドシート側のスクリプトの更新が必要です）'
+          : `送信できませんでした（${data.error || '不明なエラー'}）`;
+        sendBtn.disabled = skipBtn.disabled = false;
+        return;
+      }
       resNote.textContent = `${data.rank}位にランクイン！`;
       resForm.classList.add('hidden');
       resOk.classList.remove('hidden');

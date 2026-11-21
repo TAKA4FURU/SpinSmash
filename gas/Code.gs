@@ -4,7 +4,7 @@
 
 const SHEET_NAME = 'scores';
 const TOP_N = 50;          // 返す件数
-const MAX_SCORE = 10000000; // これを超えるスコアは不正として受け付けない
+const MAX_SCORE = 1e12;      // これを超えるスコアは不正として受け付けない（ボールが大量に増えるので大きめに）
 
 function getSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
