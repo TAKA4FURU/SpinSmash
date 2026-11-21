@@ -402,6 +402,7 @@
     muted:      false, // ミュート
     // 演出
     fx:         1.0,   // パドルの光・ビーム・破片の強さ
+    bgSpeed:    10,    // 背景スクロールの速さ（倍率）
   };
 
   const SLIDERS = [
@@ -430,6 +431,7 @@
     { key: 'volume',     label: '音量',         min: 0, max: 1,   step: 0.05 },
     { group: '演出' },
     { key: 'fx',         label: '演出の強さ',   min: 0, max: 2,   step: 0.1 },
+    { key: 'bgSpeed',    label: '背景スクロール速度', min: 0, max: 20, step: 0.5 },
   ];
 
   // ---- 効果音（素材なし・Web Audioで合成） ----
@@ -689,11 +691,11 @@
   let trail = [], particles = [], dmgTexts = [], banner = null;
 
   // ---- 背景：テーマの模様を1枚描いておき、上から下へスクロール ----
-  let bgTile = null, bgOffset = 0, bgTheme = null;
+  let bgTile = null, bgOffset = 0, bgTheme = null, streakLen = 0;
   const streaks = Array.from({ length: 16 }, () => ({ x: Math.random(), y: Math.random(), len: 0.04 + Math.random() * 0.08, sp: 1.6 + Math.random() * 1.6 }));
   function buildBg(theme) {
     bgTheme = theme;
-    const th = Math.ceil(H * 1.6);
+    const th = Math.ceil(H * 3); // 速くスクロールしても繰り返しが目立たない長さ
     const c = document.createElement('canvas');
     c.width = Math.ceil(W * dpr); c.height = Math.ceil(th * dpr);
     const g = c.getContext('2d');
@@ -715,7 +717,7 @@
       ctx.beginPath();
       for (const s of streaks) {
         const x = s.x * W, y = (s.y * H) % H;
-        ctx.moveTo(x, y); ctx.lineTo(x, y + s.len * H);
+        ctx.moveTo(x, y); ctx.lineTo(x, y + (s.len + streakLen) * H);
       }
       ctx.stroke();
     }
@@ -723,9 +725,12 @@
   function updateBg(dt) {
     // ボールが速いほどスクロールも速く
     const v = (state === 'play' && ball && ball.vx != null) ? speedOf() / H : 0;
-    const sp = H * (0.25 + 0.35 * Math.min(1, v / Math.max(CFG.maxSpeed, 0.1)));
-    bgOffset += sp * dt;
-    for (const s of streaks) { s.y += s.sp * sp / H * dt; if (s.y > 1.1) { s.y -= 1.2; s.x = Math.random(); } }
+    const sp = H * (0.25 + 0.35 * Math.min(1, v / Math.max(CFG.maxSpeed, 0.1))) * CFG.bgSpeed;
+    bgOffset = (bgOffset + sp * dt) % 1e7;
+    // 光の筋：速いほど長く伸ばし、動きは抑えめにしてチラつきを防ぐ
+    streakLen = Math.min(0.6, sp / H * 0.12);
+    const ssp = Math.min(sp, H * 3);
+    for (const s of streaks) { s.y += s.sp * ssp / H * dt; if (s.y > 1.1) { s.y -= 1.2 + s.len; s.x = Math.random(); } }
   }
 
   // ---- 画面サイズに合わせてレイアウト ----
