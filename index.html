@@ -717,8 +717,8 @@
       if (ac) { if (ac.state !== 'running') ac.resume(); return; }
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
-      // iOS 17+：マナーモード中でも鳴らす（未対応なら無視）
-      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+      // iOS 17+：マナーモード中は鳴らさない・他のアプリの音楽を止めない（未対応なら無視）
+      try { if (navigator.audioSession) navigator.audioSession.type = 'ambient'; } catch (e) {}
       ac = new AC();
       master = ac.createGain();
       master.connect(ac.destination);
@@ -738,7 +738,7 @@
     }
     function resume() {
       if (!ac) return;
-      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+      try { if (navigator.audioSession) navigator.audioSession.type = 'ambient'; } catch (e) {}
       if (ac.state !== 'running') ac.resume();
     }
     function setVolume() {
