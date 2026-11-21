@@ -174,7 +174,7 @@
         <input id="optFx" type="range" min="0" max="2" step="0.1">
       </label>
       <label class="optRow">背景スクロール速度 <span id="optBgVal"></span>
-        <input id="optBg" type="range" min="0" max="20" step="0.5">
+        <input id="optBg" type="range" min="-20" max="20" step="0.5">
       </label>
       <button id="optClose">とじる</button>
     </div>
@@ -558,7 +558,7 @@
     { key: 'bgmVol',     label: 'BGM音量',      min: 0, max: 1,   step: 0.05 },
     { group: '演出' },
     { key: 'fx',         label: '演出の強さ',   min: 0, max: 2,   step: 0.1 },
-    { key: 'bgSpeed',    label: '背景スクロール速度', min: 0, max: 20, step: 0.5 },
+    { key: 'bgSpeed',    label: '背景スクロール速度（マイナスで逆向き）', min: -20, max: 20, step: 0.5 },
   ];
 
   // ---- 効果音（素材なし・Web Audioで合成） ----
@@ -1166,10 +1166,11 @@
     // ボールが速いほどスクロールも速く
     const v = (state === 'play' && ball && ball.vx != null) ? speedOf() / H : 0;
     const sp = H * (0.25 + 0.35 * Math.min(1, v / Math.max(CFG.maxSpeed, 0.1))) * CFG.bgSpeed;
-    bgOffset = ((bgOffset + sp * dt) % 1e7 + 1e7) % 1e7;
+    const th = bgTile ? bgTile.th : H; // 背景1枚分で折り返す（どちら向きでも継ぎ目でずれない）
+    bgOffset = ((bgOffset + sp * dt) % th + th) % th;
     // 光の筋：速いほど長く伸ばし、動きは抑えめにしてチラつきを防ぐ
-    streakLen = Math.min(0.6, sp / H * 0.12);
-    const ssp = Math.min(sp, H * 3);
+    streakLen = Math.min(0.6, Math.abs(sp) / H * 0.12);
+    const ssp = Math.sign(sp) * Math.min(Math.abs(sp), H * 3); // マイナスなら下から上へ流れる
     for (const s of streaks) { s.y += s.sp * ssp / H * dt; if (s.y > 1.1) { s.y -= 1.2 + s.len; s.x = Math.random(); } if (s.y < -0.3) s.y += 1.3; }
   }
 
@@ -3246,7 +3247,7 @@
     const showVals = () => {
       bgmVal.textContent = pct(CFG.bgmVol); seVal.textContent = pct(CFG.volume);
       document.getElementById('optFxVal').textContent = CFG.fx > 0 ? `×${CFG.fx.toFixed(1)}` : 'オフ';
-      document.getElementById('optBgVal').textContent = CFG.bgSpeed > 0 ? `×${CFG.bgSpeed}` : '止める';
+      document.getElementById('optBgVal').textContent = CFG.bgSpeed > 0 ? `×${CFG.bgSpeed}` : CFG.bgSpeed < 0 ? `逆向き ×${-CFG.bgSpeed}` : '止める';
     };
     // 演出：パドルの光・ビーム・破片の強さ／背景の流れる速さ（⚙パネルと連動）
     for (const [el, key] of [[optFx, 'fx'], [optBg, 'bgSpeed']]) {
