@@ -127,6 +127,7 @@
     <div class="btns">
       <button id="vMoveBtn">↕ 上下移動</button>
     </div>
+    <div class="btns"><button id="bossBtn">ボス戦へ（テスト用）</button></div>
     <div class="lab" style="margin-bottom:4px">ステージへ移動（テスト用）</div>
     <div class="stageBtns" id="stageBtns"></div>
     <div class="meter">
@@ -687,6 +688,35 @@
         if (!ok('feverEnd', 500)) return;
         tone(1046, 392, 0, 0.4, 0.15, 'square');
       },
+      // ボス登場：警報
+      bossAppear() {
+        if (!ok('bossAppear', 1000)) return;
+        for (let i = 0; i < 3; i++) { tone(880, 660, i * 0.45, 0.2, 0.25, 'square'); tone(660, 880, i * 0.45 + 0.2, 0.2, 0.25, 'square'); }
+        tone(80, 40, 0, 1.2, 0.5);
+      },
+      bossShoot(key) {
+        if (!ok('bossShoot', 120)) return;
+        tone(key === 'electric' ? 1800 : 700, key === 'electric' ? 900 : 250, 0, 0.12, 0.15, 'square');
+      },
+      bossHit(power) {
+        if (!ok('bossHit', 50)) return;
+        tone(140, 50, 0, 0.15, 0.5 + 0.3 * power);
+        pock(500, 0.08, 0.5, 1500);
+        click(0.4, 2000, 0.02);
+      },
+      bossDown() {
+        if (!ok('bossDown', 1000)) return;
+        for (let i = 0; i < 5; i++) setTimeout(() => { tone(200, 30, 0, 0.6, 0.6); click(0.6, 800, 0.15); }, i * 160);
+      },
+      // しびれた：ビリビリ
+      stunned() {
+        if (!ok('stunned', 200)) return;
+        const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(), lfo = ac.createOscillator(), lg = ac.createGain();
+        o.type = 'square'; o.frequency.value = 220;
+        lfo.frequency.value = 30; lg.gain.value = 120; lfo.connect(lg); lg.connect(o.frequency);
+        g.gain.setValueAtTime(0.18, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+        o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.52); lfo.start(t); lfo.stop(t + 0.52);
+      },
       // 減速：「ヒュゥン」と下がっていく音
       powerDown(amount) {
         if (!ok('powerDown', 80)) return;
@@ -935,6 +965,7 @@
     particles = []; dmgTexts = []; items = []; popups = []; zaps = []; swingHist = [];
     eff.wide = 0; eff.power = 0; eff.poison = 0; eff.barrier = 0;
     fever = 0; feverGauge = 0; stageTime = 0; windT = 0;
+    boss = null; shots = []; bossDone = false; eff.stun = 0;
     makeBricks(); // 先にブロック（パドルの上限がブロック位置で決まるため）
     if (!paddle) paddle = { x: W / 2, vx: 0, prevX: W / 2, vy: 0, y: null };
     paddle.y = null; targetY = null;
@@ -1152,15 +1183,21 @@
     gimmicks(dt);
     updateItems(dt);
     updateFever(dt);
-    // WIDE中はパドルが広がる
-    const wantW = W * CFG.paddleW * (eff.wide > 0 ? 1.5 : 1);
+    updateBoss(dt);
+    updateShots(dt);
+    // WIDE中は広がり、しびれ中は縮んで動きが鈍る
+    const wantW = W * CFG.paddleW * (eff.wide > 0 ? 1.5 : 1) * (eff.stun > 0 ? 0.7 : 1);
     paddle.w += (wantW - paddle.w) * Math.min(1, dt * 10);
-    paddle.x = Math.min(Math.max(targetX, paddle.w / 2), W - paddle.w / 2);
+    const tx = Math.min(Math.max(targetX, paddle.w / 2), W - paddle.w / 2);
+    paddle.x = eff.stun > 0 ? paddle.x + (tx - paddle.x) * Math.min(1, dt * 4) : tx;
     const instVx = (paddle.x - paddle.prevX) / Math.max(dt, 1e-3);
     paddle.vx += (instVx - paddle.vx) * 0.5;
     paddle.prevX = paddle.x;
     paddle.frameStartY = paddle.y;
-    if (CFG.vMove) paddle.y = Math.max(paddle.minY, Math.min(paddle.baseY, targetY));
+    if (CFG.vMove) {
+      const ty = Math.max(paddle.minY, Math.min(paddle.baseY, targetY));
+      paddle.y = eff.stun > 0 ? paddle.y + (ty - paddle.y) * Math.min(1, dt * 4) : ty;
+    }
     else paddle.y = paddle.baseY;
     const instVy = (paddle.y - paddle.frameStartY) / Math.max(dt, 1e-3);
     paddle.vy += (instVy - paddle.vy) * 0.5;
@@ -1323,6 +1360,8 @@
       }
     }
 
+    if (state === 'play') collideBoss();
+
     // 下：バリアかフィーバー中は跳ね返る
     const floorY = H - safeBottom * 0.35;
     if (ball.vy > 0 && ball.y + ball.r >= floorY && (eff.barrier > 0 || fever > 0)) {
@@ -1390,7 +1429,7 @@
     if (key === 'bio' && !b.revived && Math.random() < 0.35) { b.reviveT = 7; }
     if (key === 'fire' && source !== 'fire') burn(b);
     if (key === 'electric' && source === 'ball') zap(b, b.maxHp * 0.5);
-    if (bricks.every(k => !k.alive)) stageClear();
+    if (bricks.every(k => !k.alive) && !boss && !bossDone) spawnBoss();
     return true;
   }
 
@@ -1437,7 +1476,7 @@
     { id: 'oneup',   label: '1UP',     color: '#ffd23f', w: 10 },
   ];
   let items = [];
-  const eff = { wide: 0, power: 0, poison: 0, barrier: 0 }; // アイテム・毒の効果時間
+  const eff = { wide: 0, power: 0, poison: 0, barrier: 0, stun: 0 }; // アイテム・毒の効果時間
   function dropItem(b) {
     let r = Math.random() * ITEMS.reduce((a, it) => a + it.w, 0), it = ITEMS[0];
     for (const x of ITEMS) { r -= x.w; if (r <= 0) { it = x; break; } }
@@ -1524,6 +1563,274 @@
       SFX.feverStart();
       banner = { text: 'FEVER!!', sub: '8秒間 一撃・落ちない・スコア2倍', color: '#ff7ae0', life: 1.8 };
     }
+  }
+
+  // ---- ボス ----
+  // shot: n=弾数 spread=広がり(rad) speed=速さ(画面高さ/秒) aim=パドル狙い wobble=揺れ grav=重力 homing=追尾 warn=予告(秒)
+  const BOSSES = {
+    grass:    { name: 'フロラ・グランデ',   shot: { n: 3, spread: 0.35, speed: 0.35, size: 6,  color: '#b6ff7a' } },
+    water:    { name: 'アクアジェリー',     shot: { n: 4, spread: 0.6,  speed: 0.22, size: 9,  color: '#8fd8ff', wobble: 1 } },
+    fire:     { name: 'イグニス',           shot: { n: 1, spread: 0,    speed: 0.5,  size: 9,  color: '#ff7a1a', aim: true, burst: 3 } },
+    electric: { name: 'ボルトクラウド',     shot: { n: 1, spread: 0,    speed: 1.3,  size: 5,  color: '#ffe14d', aim: true, warn: 0.7 } },
+    sky:      { name: 'ゲイルホーク',       shot: { n: 5, spread: 0.9,  speed: 0.3,  size: 6,  color: '#e6f4ff', wobble: 1.5 } },
+    rock:     { name: 'ガンセキゴーレム',   shot: { n: 2, spread: 0.5,  speed: 0.1,  size: 13, color: '#a1887f', grav: 0.9 } },
+    ice:      { name: 'フロストクリスタ',   shot: { n: 3, spread: 0.25, speed: 0.6,  size: 6,  color: '#bdf3ff' } },
+    poison:   { name: 'ヴェノムスライム',   shot: { n: 6, spread: 1.2,  speed: 0.25, size: 8,  color: '#9cff57', grav: 0.2 } },
+    steel:    { name: 'アイアンフォート',   shot: { n: 5, spread: 0.7,  speed: 0.45, size: 5,  color: '#e0e6ea', aim: true } },
+    bio:      { name: 'セルマザー',         shot: { n: 4, spread: 0.8,  speed: 0.3,  size: 8,  color: '#ff6f91', homing: 0.9 } },
+  };
+  let boss = null, shots = [], bossDone = false;
+
+  function spawnBoss() {
+    const key = themeOf(stage).key, last = stage === STAGES;
+    const hp = Math.round((1000 + 330 * (stage - 1)) * (last ? 1.5 : 1));
+    boss = { key, name: BOSSES[key].name, hp, maxHp: hp, t: 0, hitT: 0, inv: 0, fireT: 2.5, burstLeft: 0,
+      w: W * (last ? 0.56 : 0.46), h: H * (last ? 0.18 : 0.15), x: W / 2, y: 0, enter: 1 };
+    boss.baseY = top + 26 + boss.h / 2;
+    boss.y = -boss.h;
+    for (const b of bricks) b.reviveT = 0;
+    banner = { text: 'WARNING', sub: boss.name, color: '#ff4d4d', life: 2.2 };
+    SFX.bossAppear();
+  }
+
+  function updateBoss(dt) {
+    if (!boss) return;
+    const b = boss, angry = b.hp < b.maxHp * 0.5;
+    b.t += dt;
+    b.hitT = Math.max(0, b.hitT - dt * 5);
+    b.inv = Math.max(0, b.inv - dt);
+    if (b.enter > 0) { // 上から降りてくる
+      b.enter = Math.max(0, b.enter - dt * 0.6);
+      b.y = b.baseY - b.enter * (b.h + b.baseY);
+      return;
+    }
+    const sp = (0.5 + stage * 0.04) * (angry ? 1.5 : 1) * (b.key === 'sky' ? 1.6 : b.key === 'poison' ? 0.6 : 1);
+    b.x = W / 2 + Math.sin(b.t * sp) * (W / 2 - b.w / 2 - 8);
+    b.y = b.baseY + Math.sin(b.t * 1.3) * (b.key === 'sky' ? 22 : 8);
+    // 攻撃
+    b.fireT -= dt;
+    if (b.fireT <= 0) {
+      const cfg = BOSSES[b.key].shot;
+      if (cfg.burst && b.burstLeft <= 0) b.burstLeft = cfg.burst;
+      fireShots(cfg, angry);
+      if (b.burstLeft > 0) { b.burstLeft--; b.fireT = b.burstLeft > 0 ? 0.25 : nextFire(angry); }
+      else b.fireT = nextFire(angry);
+    }
+  }
+  const nextFire = angry => Math.max(1.2, 2.8 - stage * 0.12) * (angry ? 0.65 : 1) * (0.8 + Math.random() * 0.4);
+
+  function fireShots(cfg, angry) {
+    const b = boss, n = cfg.n + (angry ? 1 : 0) + (stage === STAGES ? 1 : 0);
+    const ox = b.x, oy = b.y + b.h * 0.4;
+    let base = Math.PI / 2;
+    if (cfg.aim) base = Math.atan2(paddle.y - oy, paddle.x - ox);
+    for (let i = 0; i < n; i++) {
+      const a = base + (n > 1 ? (i / (n - 1) - 0.5) * cfg.spread * 2 : 0);
+      const v = H * cfg.speed;
+      shots.push({ x: cfg.warn ? paddle.x : ox + (n > 1 ? (i / (n - 1) - 0.5) * b.w * 0.5 : 0), y: oy,
+        vx: cfg.warn ? 0 : Math.cos(a) * v, vy: cfg.warn ? v : Math.sin(a) * v,
+        size: cfg.size, color: cfg.color, wobble: cfg.wobble || 0, grav: cfg.grav || 0, homing: cfg.homing || 0,
+        delay: cfg.warn || 0, t: Math.random() * 6 });
+    }
+    SFX.bossShoot(b.key);
+  }
+
+  function updateShots(dt) {
+    for (const s of shots) {
+      if (s.delay > 0) { s.delay -= dt; continue; }
+      s.t += dt;
+      if (s.grav) s.vy += H * s.grav * dt;
+      if (s.homing) s.vx += Math.sign(paddle.x - s.x) * H * s.homing * 0.4 * dt;
+      s.x += (s.vx + (s.wobble ? Math.sin(s.t * 6) * H * 0.15 * s.wobble : 0)) * dt;
+      s.y += s.vy * dt;
+      // パドルに当たるとしびれる
+      if (Math.abs(s.x - paddle.x) < paddle.w / 2 + s.size && s.y + s.size > paddle.y && s.y - s.size < paddle.y + paddle.h) {
+        s.dead = true;
+        eff.stun = boss && boss.key === 'electric' ? 1.8 : 1.2;
+        SFX.stunned();
+        addPopup(paddle.x, paddle.y - 26, 'しびれた！', '#ff9b9b');
+      }
+      if (s.y > H + 30 || s.x < -40 || s.x > W + 40) s.dead = true;
+    }
+    if (shots.length) shots = shots.filter(s => !s.dead);
+    if (eff.stun > 0) eff.stun = Math.max(0, eff.stun - dt);
+  }
+
+  // ボールとボスの当たり判定
+  function collideBoss() {
+    if (!boss || boss.enter > 0) return;
+    const b = boss, x0 = b.x - b.w / 2, y0 = b.y - b.h / 2;
+    const nx = Math.max(x0, Math.min(ball.x, x0 + b.w)), ny = Math.max(y0, Math.min(ball.y, y0 + b.h));
+    let dx = ball.x - nx, dy = ball.y - ny;
+    const d2 = dx * dx + dy * dy;
+    if (d2 > ball.r * ball.r) return;
+    let d = Math.sqrt(d2);
+    if (d < 1e-6) { const s2 = speedOf(); dx = -ball.vx / s2; dy = -ball.vy / s2; d = 1; }
+    const nX = dx / d, nY = dy / d;
+    ball.x = nx + nX * ball.r; ball.y = ny + nY * ball.r;
+    const power = powerOf(ball.vx * nX + ball.vy * nY);
+    bounce(nX, nY, 'boss');
+    ball.selfHit = false;
+    // フィーバー中でも一撃にはしない（上限150）
+    if (b.inv > 0) { SFX.wall(power); return; } // 連続ヒット防止の無敵時間
+    b.inv = 0.35;
+    const raw = fever > 0 ? Math.max(150, ballDamage()) : ballDamage();
+    const dmg = Math.min(b.hp, Math.max(0, raw - armorOf()));
+    b.hitT = 1;
+    dmgTexts.push({ x: ball.x, y: ball.y - 10, text: dmg > 0 ? `${dmg}` : '0', kill: false, life: 0.7 });
+    if (dmg <= 0) { SFX.clank(); return; }
+    b.hp -= dmg;
+    score += Math.round(dmg * rallyMult() * (fever > 0 ? 2 : 1));
+    SFX.bossHit(power);
+    if (b.hp <= 0) bossDefeated();
+  }
+
+  function bossDefeated() {
+    const b = boss;
+    SFX.bossDown();
+    for (let i = 0; i < 4; i++) explode(b.x + (Math.random() - 0.5) * b.w, b.y + (Math.random() - 0.5) * b.h + H * 0.05);
+    score += 3000 * stage;
+    addPopup(b.x, b.y, `+${3000 * stage}`, '#fff27a');
+    boss = null; shots = []; bossDone = true;
+    stageClear();
+  }
+
+  // ---- ボスの見た目（属性ごとのオリジナル怪物） ----
+  function drawBoss() {
+    if (!boss) return;
+    const b = boss, t = b.t, angry = b.hp < b.maxHp * 0.5, th = themeOf(stage);
+    const { x, y, w, h } = b;
+    ctx.save();
+    ctx.translate(x, y);
+    const body = th.accent, dark = th.blocks[0];
+    ctx.lineJoin = 'round';
+    const P = (fn) => { ctx.beginPath(); fn(); };
+    switch (b.key) {
+      case 'grass': { // 巨大な花
+        for (let i = 0; i < 10; i++) {
+          const a = i / 10 * Math.PI * 2 + t * 0.4;
+          ctx.fillStyle = i % 2 ? '#ff7eb6' : '#ffb3d1';
+          P(() => ctx.ellipse(Math.cos(a) * w * 0.3, Math.sin(a) * h * 0.38, w * 0.17, h * 0.2, a, 0, Math.PI * 2)); ctx.fill();
+        }
+        ctx.fillStyle = '#4caf50';
+        for (const s of [-1, 1]) { P(() => ctx.ellipse(s * w * 0.42, h * 0.3, w * 0.14, h * 0.12, s * 0.5, 0, Math.PI * 2)); ctx.fill(); }
+        ctx.fillStyle = '#ffd23f'; P(() => ctx.arc(0, 0, h * 0.34, 0, Math.PI * 2)); ctx.fill();
+        break; }
+      case 'water': { // クラゲ
+        ctx.strokeStyle = 'rgba(140,210,255,0.7)'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+        for (let i = 0; i < 7; i++) {
+          const tx = (i / 6 - 0.5) * w * 0.7;
+          P(() => { ctx.moveTo(tx, h * 0.1); for (let k = 1; k <= 6; k++) ctx.lineTo(tx + Math.sin(t * 3 + i + k) * 8, h * 0.1 + k * h * 0.12); }); ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(94,200,255,0.85)';
+        P(() => { ctx.ellipse(0, 0, w * 0.45, h * 0.5, 0, Math.PI, 0); ctx.closePath(); }); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.25)'; P(() => ctx.ellipse(-w * 0.15, -h * 0.25, w * 0.12, h * 0.1, -0.3, 0, Math.PI * 2)); ctx.fill();
+        break; }
+      case 'fire': { // 炎の魔人
+        for (let i = 0; i < 7; i++) {
+          const a = (i / 6 - 0.5) * 1.8, fl = 1 + Math.sin(t * 9 + i) * 0.15;
+          ctx.fillStyle = i % 2 ? '#ff7a1a' : '#ffb347';
+          P(() => { const bx = Math.sin(a) * w * 0.32, by = -h * 0.1;
+            ctx.moveTo(bx, by - h * 0.55 * fl); ctx.quadraticCurveTo(bx + w * 0.12, by, bx, by + h * 0.3); ctx.quadraticCurveTo(bx - w * 0.12, by, bx, by - h * 0.55 * fl); }); ctx.fill();
+        }
+        ctx.fillStyle = '#ff4d1a'; P(() => ctx.ellipse(0, h * 0.05, w * 0.32, h * 0.42, 0, 0, Math.PI * 2)); ctx.fill();
+        break; }
+      case 'electric': { // 雷雲
+        ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = 3;
+        for (let i = 0; i < 3; i++) { const bx = (i - 1) * w * 0.3; P(() => { ctx.moveTo(bx, h * 0.25); ctx.lineTo(bx + 8, h * 0.4); ctx.lineTo(bx - 4, h * 0.45); ctx.lineTo(bx + 6, h * 0.62); }); if (Math.sin(t * 7 + i * 2) > 0) ctx.stroke(); }
+        ctx.fillStyle = '#3a3f66';
+        for (const [cx, cy, r] of [[-0.3, 0.05, 0.3], [0, -0.1, 0.36], [0.3, 0.05, 0.3], [-0.12, 0.15, 0.3], [0.15, 0.15, 0.3]]) { P(() => ctx.arc(cx * w, cy * h, r * h * 1.1, 0, Math.PI * 2)); ctx.fill(); }
+        break; }
+      case 'sky': { // 巨大な鳥
+        const flap = Math.sin(t * 6) * 0.5;
+        ctx.fillStyle = '#e6f4ff';
+        for (const s of [-1, 1]) { P(() => { ctx.moveTo(s * w * 0.1, 0); ctx.lineTo(s * w * 0.5, -h * (0.2 + flap)); ctx.lineTo(s * w * 0.42, h * 0.2); ctx.closePath(); }); ctx.fill(); }
+        ctx.fillStyle = '#7fb8e6'; P(() => ctx.ellipse(0, 0, w * 0.2, h * 0.42, 0, 0, Math.PI * 2)); ctx.fill();
+        ctx.fillStyle = '#ffb300'; P(() => { ctx.moveTo(-8, h * 0.2); ctx.lineTo(8, h * 0.2); ctx.lineTo(0, h * 0.38); ctx.closePath(); }); ctx.fill();
+        break; }
+      case 'rock': { // 岩の巨人
+        ctx.fillStyle = '#8d6e63'; ctx.strokeStyle = '#3e2723'; ctx.lineWidth = 3;
+        P(() => { const pts = [[-0.48, -0.2], [-0.3, -0.5], [0.1, -0.48], [0.45, -0.3], [0.5, 0.2], [0.25, 0.5], [-0.3, 0.48], [-0.5, 0.2]]; pts.forEach(([px, py], i) => i ? ctx.lineTo(px * w, py * h) : ctx.moveTo(px * w, py * h)); ctx.closePath(); }); ctx.fill(); ctx.stroke();
+        ctx.lineWidth = 2; P(() => { ctx.moveTo(-w * 0.2, -h * 0.45); ctx.lineTo(-w * 0.1, -h * 0.1); ctx.lineTo(-w * 0.25, h * 0.1); }); ctx.stroke();
+        break; }
+      case 'ice': { // 氷の結晶体
+        ctx.fillStyle = 'rgba(189,243,255,0.9)'; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+        for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2 + t * 0.3; P(() => { ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a - 0.15) * w * 0.25, Math.sin(a - 0.15) * h * 0.4); ctx.lineTo(Math.cos(a) * w * 0.48, Math.sin(a) * h * 0.55); ctx.lineTo(Math.cos(a + 0.15) * w * 0.25, Math.sin(a + 0.15) * h * 0.4); ctx.closePath(); }); ctx.fill(); ctx.stroke(); }
+        ctx.fillStyle = '#4fc3f7'; P(() => ctx.arc(0, 0, h * 0.3, 0, Math.PI * 2)); ctx.fill();
+        break; }
+      case 'poison': { // 毒スライム
+        const sq = 1 + Math.sin(t * 3) * 0.06;
+        ctx.fillStyle = '#8e24aa';
+        P(() => { ctx.ellipse(0, h * 0.05, w * 0.46 * sq, h * 0.45 / sq, 0, Math.PI, 0); ctx.lineTo(w * 0.46 * sq, h * 0.35); for (let i = 6; i >= 0; i--) ctx.lineTo((i / 6 - 0.5) * w * 0.92 * sq, h * 0.35 + (i % 2 ? 10 : 0) + Math.sin(t * 4 + i) * 4); ctx.closePath(); }); ctx.fill();
+        ctx.fillStyle = 'rgba(156,255,87,0.7)';
+        for (let i = 0; i < 5; i++) { P(() => ctx.arc(Math.sin(i * 2.1) * w * 0.3, -h * 0.1 + Math.cos(i * 1.7) * h * 0.2, 3 + (i % 3) * 2, 0, Math.PI * 2)); ctx.fill(); }
+        break; }
+      case 'steel': { // 鋼の要塞
+        ctx.fillStyle = '#607d8b'; ctx.strokeStyle = '#cfd8dc'; ctx.lineWidth = 3;
+        roundRect(-w * 0.48, -h * 0.45, w * 0.96, h * 0.9, 8); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#37474f';
+        for (const s of [-1, 1]) { roundRect(s * w * 0.36 - 10, h * 0.25, 20, h * 0.3, 4); ctx.fill(); }
+        ctx.fillStyle = '#cfd8dc';
+        for (let i = 0; i < 6; i++) { P(() => ctx.arc((i / 5 - 0.5) * w * 0.85, -h * 0.36, 2.5, 0, Math.PI * 2)); ctx.fill(); }
+        break; }
+      case 'bio': { // 巨大細胞（ラスボス）
+        ctx.strokeStyle = 'rgba(180,50,90,0.9)'; ctx.lineWidth = 8; ctx.lineCap = 'round';
+        for (let i = 0; i < 6; i++) {
+          const a = i / 6 * Math.PI * 2 + t * 0.5;
+          P(() => { ctx.moveTo(Math.cos(a) * w * 0.3, Math.sin(a) * h * 0.35); ctx.quadraticCurveTo(Math.cos(a + 0.4) * w * 0.55, Math.sin(a + 0.4) * h * 0.7 + Math.sin(t * 3 + i) * 10, Math.cos(a + 0.2) * w * 0.62, Math.sin(a + 0.2) * h * 0.75); }); ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(216,27,96,0.85)'; P(() => ctx.ellipse(0, 0, w * 0.38, h * 0.45, 0, 0, Math.PI * 2)); ctx.fill();
+        ctx.fillStyle = 'rgba(255,140,170,0.6)'; P(() => ctx.ellipse(0, 0, w * 0.22, h * 0.28, 0, 0, Math.PI * 2)); ctx.fill();
+        break; }
+    }
+    // 目（ボールを追う）と口。怒ると目が赤く口がギザギザに
+    const eyeY = b.key === 'water' ? -h * 0.15 : -h * 0.08, eyeDX = Math.min(w * 0.13, 26), er = Math.max(7, h * 0.12);
+    const lookX = Math.max(-1, Math.min(1, (ball.x - x) / W * 3)), lookY = Math.max(-1, Math.min(1, (ball.y - y) / H * 3));
+    for (const s of [-1, 1]) {
+      ctx.fillStyle = '#ffffff'; P(() => ctx.arc(s * eyeDX, eyeY, er, 0, Math.PI * 2)); ctx.fill();
+      ctx.fillStyle = angry ? '#ff1744' : '#111111';
+      P(() => ctx.arc(s * eyeDX + lookX * er * 0.4, eyeY + lookY * er * 0.4, er * 0.5, 0, Math.PI * 2)); ctx.fill();
+      if (angry) { ctx.strokeStyle = '#111'; ctx.lineWidth = 3; P(() => { ctx.moveTo(s * (eyeDX + er), eyeY - er * 1.4); ctx.lineTo(s * (eyeDX - er * 0.6), eyeY - er * 0.8); }); ctx.stroke(); }
+    }
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
+    P(() => {
+      const my = eyeY + er * 2.2, mw = eyeDX * 1.1;
+      if (angry) { ctx.moveTo(-mw, my); for (let i = 1; i <= 6; i++) ctx.lineTo(-mw + i * mw / 3, my + (i % 2 ? 6 : 0)); }
+      else { ctx.arc(0, my - 6, mw * 0.7, 0.2 * Math.PI, 0.8 * Math.PI); }
+    }); ctx.stroke();
+    // 被弾時に白く光る
+    if (b.hitT > 0) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(255,255,255,${0.35 * b.hitT})`;
+      P(() => ctx.ellipse(0, 0, w * 0.5, h * 0.55, 0, 0, Math.PI * 2)); ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.restore();
+  }
+
+  function drawShots() {
+    for (const s of shots) {
+      if (s.delay > 0) { // 予告線
+        ctx.strokeStyle = `rgba(255,225,77,${0.25 + 0.35 * Math.abs(Math.sin(s.delay * 20))})`;
+        ctx.lineWidth = 2; ctx.setLineDash([6, 6]);
+        ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x, H); ctx.stroke(); ctx.setLineDash([]);
+        continue;
+      }
+      ctx.fillStyle = s.color;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+  }
+
+  function drawBossBar() {
+    if (!boss || boss.enter > 0.5) return;
+    const y = top + 8, w = W - 20;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(10, y, w, 8);
+    ctx.fillStyle = boss.hp < boss.maxHp * 0.5 ? '#ff1744' : '#ff9100';
+    ctx.fillRect(10, y, w * boss.hp / boss.maxHp, 8);
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 10px -apple-system, "Hiragino Sans", sans-serif';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText(boss.name + (stage === STAGES ? '（ラスボス）' : ''), 12, y + 10);
   }
 
   // ちょっとした文字表示（アイテム名・PERFECTなど）
@@ -1839,7 +2146,7 @@
     if (eff.barrier > 0) chips.push(['BAR', 0, '#7df9ff']);
     ctx.font = 'bold 10px -apple-system, sans-serif';
     chips.forEach(([label, t, col], i) => {
-      const x = 10 + i * 46, y = top + 6;
+      const x = 10 + i * 46, y = boss ? top + 30 : top + 6;
       ctx.fillStyle = 'rgba(0,0,0,0.55)'; roundRect(x, y, 42, 12, 6); ctx.fill();
       ctx.fillStyle = col; ctx.fillText(t ? `${label} ${Math.ceil(t)}` : label, x + 5, y + 6.5);
     });
@@ -1870,6 +2177,7 @@
 
     drawRally();
     drawCurrents();
+    drawBoss();
 
     for (const b of bricks) {
       if (!b.alive) continue;
@@ -1959,7 +2267,7 @@
       roundRect(paddle.x - paddle.w / 2 - g, paddle.y - g, paddle.w + g * 2, paddle.h + g * 2, paddle.h / 2 + g);
       ctx.fill();
     }
-    ctx.fillStyle = paddleGlow > 0.5 ? '#ffffff' : '#e8ecff';
+    ctx.fillStyle = eff.stun > 0 ? (Math.sin(stageTime * 40) > 0 ? '#ffe14d' : '#9aa0b8') : paddleGlow > 0.5 ? '#ffffff' : '#e8ecff';
     roundRect(paddle.x - paddle.w / 2, paddle.y, paddle.w, paddle.h, paddle.h / 2);
     ctx.fill();
 
@@ -1968,7 +2276,9 @@
 
 
 
+    drawShots();
     drawExtras();
+    drawBossBar();
 
     let msg = null, sub = null;
     if (paused)                 { msg = 'PAUSE'; sub = panelOpen ? '⚙ で閉じると再開' : '右上の ▶ で再開'; }
@@ -2102,6 +2412,15 @@
     rankUI.classList.remove('hidden');
   });
   document.getElementById('rankClose').addEventListener('click', () => rankUI.classList.add('hidden'));
+
+  // テスト用：ブロックを全部消してボス戦へ
+  document.getElementById('bossBtn').addEventListener('click', () => {
+    if (state === 'title') newGame(stage);
+    for (const b of bricks) { b.alive = false; b.reviveT = 0; }
+    if (!boss) spawnBoss();
+    if (state === 'ready') launch();
+    pausedByPanel = false; setPanel(false); setPaused(false);
+  });
 
   // テスト用：ステージへ直接移動
   const stageBtns = document.getElementById('stageBtns');
