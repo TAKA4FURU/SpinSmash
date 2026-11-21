@@ -1222,6 +1222,9 @@
   const objK = () => CFG.objScale || 1;     // ボール・パドル
   const brickK = () => CFG.brickScale || 1; // ブロック
   const subdiv = () => Math.max(1, Math.round(1 / brickK()));
+  // ブロックの大きさごとの調整（1/4はHPを3割下げ、アイテムを2倍出やすく）
+  const SIZE_TUNE = { 0.25: { hp: 0.7, item: 2 } };
+  const sizeTune = () => SIZE_TUNE[brickK()] || { hp: 1, item: 1 };
   let aliveCount = 0; // 残っているブロックの数（毎回数え直さない）
   let colsInStage = COLS, brickGrid = [], brickTop = 0, brickRowH = 1, brickColW = 1, brickSide = 6, rowOff = [];
   function makeBricks() {
@@ -1243,7 +1246,7 @@
           if (t === '.') continue;
           for (let sc = 0; sc < f; sc++) {
             const type = t === 'I' && (sr || sc) ? '1' : t; // ★は1マスにつき1個だけ
-            let hp = hpAtDepth(depth) * k * brickK();      // 小さいブロックはHPも小さく
+            let hp = hpAtDepth(depth) * k * brickK() * sizeTune().hp; // 小さいブロックはHPも小さく
             if (type === 'H') hp *= 2.5;
             hp = Math.max(1, Math.round(hp));
             bricks.push({ r, c: c0 * f + sc, or: r0, type, alive: true, color: type === 'P' ? '#7cff3a' : theme.blocks[colorIdx],
@@ -1846,7 +1849,7 @@
     const s2 = speedOf() || 1;
     spawnParticles(b, -ball.vx / s2, -ball.vy / s2, 1);
     // アイテム：★ブロックは必ず、他は7%
-    if (b.type === 'I' || Math.random() < CFG.itemRate / 100) dropItem(b);
+    if (b.type === 'I' || Math.random() < CFG.itemRate / 100 * sizeTune().item) dropItem(b);
     const key = themeOf(stage).key;
     if (key === 'bio' && !b.revived && Math.random() < 0.35) { b.reviveT = 7; }
     if (key === 'fire' && source !== 'fire') burn(b);
