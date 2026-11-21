@@ -65,6 +65,13 @@
     padding: 0; touch-action: manipulation; font-family: inherit;
   }
   #hudBtns button.on { background: #ff4d6d; }
+  #rewindBtn {
+    position: fixed; z-index: 30; top: calc(env(safe-area-inset-top) + 10px); left: 8px;
+    width: 40px; height: 36px; border: 0; border-radius: 10px; padding: 0;
+    background: rgba(255,255,255,0.12); color: #fff; font-size: 16px; touch-action: none;
+    -webkit-user-select: none; user-select: none;
+  }
+  #rewindBtn.on { background: #3d6bff; }
 
   /* 調整パネル：⚙で右から重ねて表示 */
   #panel {
@@ -114,6 +121,7 @@
       <button id="rankClose">とじる</button>
     </div>
   </div>
+  <button id="rewindBtn" aria-label="巻き戻し" class="hidden">⏪</button>
   <div id="hudBtns">
     <button id="muteBtn" aria-label="ミュート">🔊</button>
     <button id="pauseBtn" aria-label="ポーズ">⏸</button>
@@ -406,6 +414,7 @@
     liftPower:  1.0,   // 振り上げて打った時の強打の強さ
     liftDecay:  1.5,   // 強打で上がった速度が元に戻る速さ
     slowPower:  0.12,
+    startLives: 3,     // ゲーム開始時の残機
     sensX:      1.5,   // 横の感度（指の移動量に対するパドルの移動量）
     sensY:      1.5,   // 縦の感度  // 振り下げながら打った時の減速（1回で最大この割合だけ遅くなる）
     maxSpeed:   1.8,   // 最高速度（画面高さ/秒）
@@ -439,6 +448,7 @@
     { key: 'liftDecay',  label: '強打の戻り',   min: 0, max: 5, step: 0.1 },
     { key: 'slowPower',  label: '振り下げ減速', min: 0, max: 0.4, step: 0.01 },
     { key: 'maxSpeed',   label: '最高速度',     min: 0.6, max: 2.5, step: 0.05 },
+    { key: 'startLives', label: '残機（次のゲームから）', min: 1, max: 99, step: 1 },
     { key: 'sensX',      label: '横の感度',     min: 0.5, max: 3, step: 0.1 },
     { key: 'sensY',      label: '縦の感度',     min: 0.5, max: 3, step: 0.1 },
     { key: 'paddleW',    label: 'パドル幅',     min: 0.1, max: 0.6, step: 0.01 },
@@ -712,6 +722,12 @@
         if (!ok('bossDown', 1000)) return;
         for (let i = 0; i < 5; i++) setTimeout(() => { tone(200, 30, 0, 0.6, 0.6); click(0.6, 800, 0.15); }, i * 160);
       },
+      // 巻き戻し：キュルキュル
+      rewind() {
+        if (!ok('rewind', 100)) return;
+        tone(1400, 500, 0, 0.1, 0.08, 'sawtooth');
+        tone(1800, 700, 0.1, 0.1, 0.06, 'sawtooth');
+      },
       // 弾を消した：パリン
       shotBreak() {
         if (!ok('shotBreak', 40)) return;
@@ -829,11 +845,11 @@
     // ボールが速いほどスクロールも速く
     const v = (state === 'play' && ball && ball.vx != null) ? speedOf() / H : 0;
     const sp = H * (0.25 + 0.35 * Math.min(1, v / Math.max(CFG.maxSpeed, 0.1))) * CFG.bgSpeed;
-    bgOffset = (bgOffset + sp * dt) % 1e7;
+    bgOffset = ((bgOffset + sp * dt) % 1e7 + 1e7) % 1e7;
     // 光の筋：速いほど長く伸ばし、動きは抑えめにしてチラつきを防ぐ
     streakLen = Math.min(0.6, sp / H * 0.12);
     const ssp = Math.min(sp, H * 3);
-    for (const s of streaks) { s.y += s.sp * ssp / H * dt; if (s.y > 1.1) { s.y -= 1.2 + s.len; s.x = Math.random(); } }
+    for (const s of streaks) { s.y += s.sp * ssp / H * dt; if (s.y > 1.1) { s.y -= 1.2 + s.len; s.x = Math.random(); } if (s.y < -0.3) s.y += 1.3; }
   }
 
   // ---- 画面サイズに合わせてレイアウト ----
@@ -978,6 +994,7 @@
     eff.wide = 0; eff.power = 0; eff.poison = 0; eff.barrier = 0;
     fever = 0; feverGauge = 0; stageTime = 0; windT = 0;
     boss = null; shots = []; bossDone = false; eff.stun = 0; eff.safe = 0;
+    history = [];
     makeBricks(); // 先にブロック（パドルの上限がブロック位置で決まるため）
     if (!paddle) paddle = { x: W / 2, vx: 0, prevX: W / 2, vy: 0, y: null };
     paddle.y = null; targetY = null;
@@ -991,7 +1008,7 @@
   }
 
   function newGame(startStage) {
-    score = 0; lives = LIVES; bestRally = 0; scoreSaved = false;
+    score = 0; lives = Math.round(CFG.startLives) || LIVES; bestRally = 0; scoreSaved = false;
     setTitle(false);
     loadStage(startStage || 1);
   }
@@ -1032,12 +1049,14 @@
   function startDrag(e) {
     const x = pointerX(e), y = pointerY(e);
     if (x === null || y === null) return;
+    lastPX = x; lastPY = y;
     touchStartX = x; paddleStartX = paddle.x;
     touchStartY = y; paddleStartY = paddle.y;
   }
   function moveDrag(e) {
     const x = pointerX(e), y = pointerY(e);
     if (x === null || y === null) return;
+    lastPX = x; lastPY = y;
     // 横：端に着いたら基準点をずらし、戻す時にすぐ反応するようにする
     let tx = paddleStartX + (x - touchStartX) * CFG.sensX;
     const minX = paddle.w / 2, maxX = W - paddle.w / 2;
@@ -1411,7 +1430,7 @@
       SFX.selfDestruct();
       explode(ball.x, H - 4);
       feverGauge = 0;
-      if (lives <= 0) { state = 'over'; saveScore(); }
+      if (lives <= 0) state = 'over'; // 記録はタイトルへ戻る時（巻き戻しで復活できるように）
       else resetBall();
     }
   }
@@ -1539,7 +1558,7 @@
       setSpeed(Math.min(s0 * 1.15, H * CFG.maxSpeed));
     }
     if (it.id === 'slow' && state === 'play') setSpeed(Math.max(H * CFG.speed, s0 * 0.75));
-    if (it.id === 'oneup') { lives = Math.min(5, lives + 1); SFX.oneUp(); }
+    if (it.id === 'oneup') { lives = Math.min(99, lives + 1); SFX.oneUp(); }
     else SFX.item();
     addPopup(it.x, paddle.y - 24, it.label === '1UP' ? '1UP!' : it.label, it.color);
     score += 50;
@@ -2174,7 +2193,7 @@
     if (m > 1) {
       ctx.font = 'bold 13px -apple-system, sans-serif';
       ctx.fillStyle = '#ffd23f';
-      ctx.fillText(`x${m.toFixed(1)}`, 14 + ctx.measureText('SCORE ' + score).width * 1.25, top / 2 + 12);
+      ctx.fillText(`x${m.toFixed(1)}`, 58 + ctx.measureText('SCORE ' + score).width * 1.25, top / 2 + 12);
     }
     const g = fever > 0 ? fever / 8 : feverGauge;
     if (g > 0) {
@@ -2206,12 +2225,12 @@
     ctx.textAlign = 'left';
     ctx.fillStyle = th.accent;
     ctx.font = 'bold 11px -apple-system, "Hiragino Sans", sans-serif';
-    ctx.fillText(`STAGE ${stage}  ${th.name}`, 10, top / 2 - 4);
+    ctx.fillText(`STAGE ${stage}  ${th.name}`, 54, top / 2 - 4); // 左上の巻き戻しボタンの右
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 16px -apple-system, "Hiragino Sans", sans-serif';
-    ctx.fillText('SCORE ' + score, 10, top / 2 + 12);
+    ctx.fillText('SCORE ' + score, 54, top / 2 + 12);
     ctx.textAlign = 'right';
-    ctx.fillText('♥'.repeat(Math.max(lives, 0)), W - 140, top / 2 + 8); // 右上ボタンの左
+    ctx.fillText(lives > 5 ? `♥×${lives}` : '♥'.repeat(Math.max(lives, 0)), W - 140, top / 2 + 8); // 右上ボタンの左
     ctx.fillStyle = 'rgba(255,255,255,0.15)';
     ctx.fillRect(0, top, W, 1);
 
@@ -2438,12 +2457,22 @@
     saveCfg();
   });
   document.getElementById('restartBtn').addEventListener('click', () => { goTitle(); pausedByPanel = false; setPanel(false); setPaused(false); });
+  // ---- 巻き戻しボタン（押している間だけ） ----
+  const rewindBtn = document.getElementById('rewindBtn');
+  const setRewind = on => { rewinding = on; rewindBtn.classList.toggle('on', on); };
+  rewindBtn.addEventListener('touchstart', e => { e.preventDefault(); SFX.init(); setRewind(true); }, { passive: false });
+  rewindBtn.addEventListener('touchend', e => { e.preventDefault(); setRewind(false); }, { passive: false });
+  rewindBtn.addEventListener('touchcancel', () => setRewind(false));
+  rewindBtn.addEventListener('mousedown', () => { SFX.init(); setRewind(true); });
+  window.addEventListener('mouseup', () => setRewind(false));
+
   // ---- タイトル画面 ----
   const titleUI = document.getElementById('titleUI');
   const rankUI = document.getElementById('rankUI');
   function setTitle(show) {
     titleUI.classList.toggle('hidden', !show);
     pauseBtn.classList.toggle('hidden', show);
+    rewindBtn.classList.toggle('hidden', show);
     if (show) rankUI.classList.add('hidden');
   }
   document.getElementById('startBtn').addEventListener('click', () => { SFX.init(); newGame(1); });
@@ -2513,13 +2542,75 @@
     spinFill.style.background = ratio >= 0 ? BALL_COLOR_B : BALL_COLOR_A;
   }
 
+  // ---- 巻き戻し：直近5秒の状態を記録し、ボタンを押している間さかのぼる ----
+  const REWIND_SEC = 5;
+  let history = [], rewinding = false, rewindSfxT = 0, lastPX = 0, lastPY = 0;
+  function snapshot() {
+    return {
+      ball: { ...ball }, px: paddle.x, py: paddle.y, pw: paddle.w,
+      br: bricks.map(b => [b.alive, b.hp, b.reviveT, b.revived]),
+      score, lives, state, rally, chain, stageTime, windT, bossDone,
+      items: items.map(i => ({ ...i })), eff: { ...eff }, fever, feverGauge,
+      boss: boss ? { ...boss } : null, shots: shots.map(x => ({ ...x })),
+    };
+  }
+  function restore(sn) {
+    Object.assign(ball, sn.ball);
+    paddle.x = paddle.prevX = sn.px; paddle.y = paddle.frameStartY = sn.py; paddle.w = sn.pw;
+    paddle.vx = 0; paddle.vy = 0;
+    targetX = sn.px; targetY = sn.py;
+    // 指を置いたままでもパドルが飛ばないよう、ドラッグの基準を今の指の位置に合わせ直す
+    touchStartX = lastPX; paddleStartX = sn.px; touchStartY = lastPY; paddleStartY = sn.py;
+    sn.br.forEach((v, i) => { const b = bricks[i]; if (b) [b.alive, b.hp, b.reviveT, b.revived] = v; });
+    ({ score, lives, state, rally, chain, stageTime, windT, bossDone, fever, feverGauge } = sn);
+    items = sn.items.map(i => ({ ...i }));
+    Object.assign(eff, sn.eff);
+    boss = sn.boss ? { ...sn.boss } : null;
+    shots = sn.shots.map(x => ({ ...x }));
+    moveBricks(0);
+    trail = [];
+  }
+  function recordHistory() {
+    if (state !== 'play' && state !== 'ready') return;
+    history.push(snapshot());
+    if (history.length > REWIND_SEC * 60) history.shift();
+  }
+  const canRewind = () => (state === 'play' || state === 'ready' || state === 'over') && history.length > 0;
+  function rewindStep(dt) {
+    // 2倍速でさかのぼる
+    for (let i = 0; i < 2 && history.length; i++) restore(history.pop());
+    rewindSfxT -= dt;
+    if (rewindSfxT <= 0) { SFX.rewind(); rewindSfxT = 0.22; }
+    updateBg(-dt * 2);
+  }
+  // 巻き戻し中の見た目（点滅なし：青みがかった色と表示）
+  function drawRewind() {
+    if (!rewinding || !canRewind()) return;
+    ctx.fillStyle = 'rgba(60,110,255,0.14)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let y = 0; y < H; y += 4) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = 'italic 900 28px -apple-system, "Hiragino Sans", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText('◀◀ REWIND', W / 2, H * 0.3);
+    ctx.font = 'bold 12px -apple-system, "Hiragino Sans", sans-serif';
+    ctx.fillText(`のこり ${(history.length / 60).toFixed(1)} 秒`, W / 2, H * 0.3 + 26);
+  }
+
   // ---- ループ ----
   let last = performance.now();
   function loop(now) {
     const dt = Math.min((now - last) / 1000, 1 / 30);
     last = now;
-    if (!paused) update(dt);
+    if (!paused) {
+      if (rewinding && canRewind()) rewindStep(dt);
+      else { update(dt); recordHistory(); }
+    }
     draw();
+    drawRewind();
     updateMeter();
     requestAnimationFrame(loop);
   }
