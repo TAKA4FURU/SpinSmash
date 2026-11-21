@@ -405,7 +405,9 @@
     vMove:      true,  // 上下移動のオン/オフ
     liftPower:  1.0,   // 振り上げて打った時の強打の強さ
     liftDecay:  1.5,   // 強打で上がった速度が元に戻る速さ
-    slowPower:  0.12,  // 振り下げながら打った時の減速（1回で最大この割合だけ遅くなる）
+    slowPower:  0.12,
+    sensX:      1.5,   // 横の感度（指の移動量に対するパドルの移動量）
+    sensY:      1.5,   // 縦の感度  // 振り下げながら打った時の減速（1回で最大この割合だけ遅くなる）
     maxSpeed:   1.8,   // 最高速度（画面高さ/秒）
     paddleW:    0.6,  // パドル幅（プレイ領域の幅比）
     minVert:    0.3,   // 縦方向の最小比（横に寝すぎ防止）
@@ -437,6 +439,8 @@
     { key: 'liftDecay',  label: '強打の戻り',   min: 0, max: 5, step: 0.1 },
     { key: 'slowPower',  label: '振り下げ減速', min: 0, max: 0.4, step: 0.01 },
     { key: 'maxSpeed',   label: '最高速度',     min: 0.6, max: 2.5, step: 0.05 },
+    { key: 'sensX',      label: '横の感度',     min: 0.5, max: 3, step: 0.1 },
+    { key: 'sensY',      label: '縦の感度',     min: 0.5, max: 3, step: 0.1 },
     { key: 'paddleW',    label: 'パドル幅',     min: 0.1, max: 0.6, step: 0.01 },
     { key: 'minVert',    label: '最小縦角度',   min: 0.1, max: 0.6, step: 0.02 },
     { group: '音' },
@@ -1023,35 +1027,42 @@
     return t ? t.clientY : null;
   }
   // 縦は「触れた位置からの移動量」で動かす（タップした場所へ瞬間移動しない）
-  function startVertical(e) {
-    const y = pointerY(e);
-    if (y === null) return;
-    touchStartY = y;
-    paddleStartY = paddle.y;
+  // 縦横とも「触れた位置から指を動かした量 × 感度」で動かす
+  let touchStartX = 0, paddleStartX = 0;
+  function startDrag(e) {
+    const x = pointerX(e), y = pointerY(e);
+    if (x === null || y === null) return;
+    touchStartX = x; paddleStartX = paddle.x;
+    touchStartY = y; paddleStartY = paddle.y;
   }
-  function moveVertical(e) {
+  function moveDrag(e) {
+    const x = pointerX(e), y = pointerY(e);
+    if (x === null || y === null) return;
+    // 横：端に着いたら基準点をずらし、戻す時にすぐ反応するようにする
+    let tx = paddleStartX + (x - touchStartX) * CFG.sensX;
+    const minX = paddle.w / 2, maxX = W - paddle.w / 2;
+    const cx = Math.max(minX, Math.min(maxX, tx));
+    if (cx !== tx) { paddleStartX -= (tx - cx); tx = cx; }
+    targetX = tx;
     if (!CFG.vMove) return;
-    const y = pointerY(e);
-    if (y === null) return;
-    targetY = paddleStartY + (y - touchStartY);
+    let ty = paddleStartY + (y - touchStartY) * CFG.sensY;
+    const cy = Math.max(paddle.minY, Math.min(paddle.baseY, ty));
+    if (cy !== ty) { paddleStartY -= (ty - cy); ty = cy; }
+    targetY = ty;
   }
   function onDown(e) {
     e.preventDefault();
     if (panelOpen) { setPanel(false); return; } // パネル外をタップで閉じる
     SFX.init(); // iOSは画面に触れた時に音を有効化する必要がある
     if (paused || state === 'title' || state === 'stageClear') return;
-    const x = pointerX(e);
-    if (x !== null) targetX = x;
-    startVertical(e);
+    startDrag(e);
     if (state === 'ready') { launch(); SFX.paddle(0.5, 0, 0); }
     else if (state === 'over' || state === 'allClear') goTitle();
   }
   function onMove(e) {
     e.preventDefault();
     if (paused) return;
-    const x = pointerX(e);
-    if (x !== null) targetX = x;
-    moveVertical(e);
+    moveDrag(e);
   }
   cv.addEventListener('touchstart', onDown, { passive: false });
   cv.addEventListener('touchmove', onMove, { passive: false });
