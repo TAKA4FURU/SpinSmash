@@ -169,7 +169,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.09</div>
+    <div id="ver">ver 0.0.10</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -265,7 +265,7 @@
   const COLORS = ['#ff5d73', '#ff9f43', '#feca57', '#1dd1a1', '#48dbfb', '#a29bfe'];
   const BALL_COLOR_A = '#ff4d6d';
   const BALL_COLOR_B = '#4dd8ff';
-  const STAGES = 10;
+  const STAGES = 11;
   // オンラインランキングの送信先（Google Apps Script のウェブアプリURL）。空なら端末内のみ
   const RANKING_URL = 'https://script.google.com/macros/s/AKfycbxRo_Qw_NBhHSL5RvNaRYkSm--3pAhc8pyG5BgpHlO1gPM9aRoY62q5XXf04JaB_o5B/exec';
 
@@ -286,6 +286,32 @@
     if (y + size > th) fn(y - th);
   }
   const THEMES = [
+    { key: 'space', name: 'うちゅう', bg: ['#04030d', '#0c0a26'], accent: '#b8a6ff',
+      blocks: ['#3a2a7a', '#5240a8', '#6a5acd', '#7f8cff', '#8ec5ff', '#c4e8ff'],
+      paint(g, w, th, R) {
+        for (let i = 0; i < 260; i++) {              // 星
+          const x = R() * w, y = R() * th, r = R() < 0.9 ? 0.6 + R() * 0.8 : 1.4 + R() * 1.2;
+          g.fillStyle = `rgba(${200 + R() * 55 | 0},${200 + R() * 55 | 0},255,${0.35 + R() * 0.6})`;
+          wrapY(th, y, r, yy => { g.beginPath(); g.arc(x, yy, r, 0, Math.PI * 2); g.fill(); });
+        }
+        for (let i = 0; i < 5; i++) {                // 星雲
+          const x = R() * w, y = R() * th, r = 60 + R() * 120, hue = [260, 200, 300, 220][i % 4];
+          wrapY(th, y, r, yy => {
+            const gr = g.createRadialGradient(x, yy, 0, x, yy, r);
+            gr.addColorStop(0, `hsla(${hue},80%,60%,0.12)`); gr.addColorStop(1, `hsla(${hue},80%,60%,0)`);
+            g.fillStyle = gr; g.beginPath(); g.arc(x, yy, r, 0, Math.PI * 2); g.fill();
+          });
+        }
+        for (let i = 0; i < 3; i++) {                // 惑星（輪っか付きもある）
+          const x = R() * w, y = R() * th, r = 10 + R() * 26, hue = R() * 360, ring = R() < 0.5;
+          wrapY(th, y, r * 2.2, yy => {
+            const gr = g.createRadialGradient(x - r * 0.4, yy - r * 0.4, r * 0.1, x, yy, r);
+            gr.addColorStop(0, `hsla(${hue},60%,70%,0.55)`); gr.addColorStop(1, `hsla(${hue},50%,25%,0.45)`);
+            g.fillStyle = gr; g.beginPath(); g.arc(x, yy, r, 0, Math.PI * 2); g.fill();
+            if (ring) { g.strokeStyle = `hsla(${hue},60%,80%,0.35)`; g.lineWidth = 2; g.beginPath(); g.ellipse(x, yy, r * 2, r * 0.5, -0.3, 0, Math.PI * 2); g.stroke(); }
+          });
+        }
+      } },
     { key: 'grass', name: 'くさ', bg: ['#0e2614', '#17391d'], accent: '#7ddc6a',
       blocks: ['#1b5e20', '#2e7d32', '#43a047', '#66bb6a', '#9ccc65', '#c5e1a5'],
       paint(g, w, th, R) {
@@ -485,7 +511,8 @@
       } },
   ];
   // ブロックの並び（1=普通 H=硬い I=アイテム P=毒 .=なし、行頭の > はその列が左右に動く）
-  const LAYOUTS = {"grass": ["1111111", "1111111", "11I1I11", "1111111", "1111111"],
+  const LAYOUTS = {"space": ["1111111", "1.1I1.1", "1111111", "11.1.11", "1111111"],
+     "grass": ["1111111", "1111111", "11I1I11", "1111111", "1111111"],
      "water": ["1111111", ">.11I11.", "1H111H1", ">..111..", "1111111"],
      "fire": ["...H...", "..1I1..", ".11111.", "1111111", "1H1H1H1", "1111111"],
      "electric": ["1.1.1.1", ">.1I1I1.", "1111111", ">..H1H..", "1.1.1.1", "1111111"],
@@ -496,7 +523,8 @@
      "steel": ["HHHHHHH", ">.H1I1H.", "1H1H1H1", ">..HHH..", "H1H1H1H", "1111111"],
      "bio": [">..111..", ">.11H11.", "11HIH11", ">.1HHH1.", "1111111", ">.1I1I1.", "..1.1.."]};
   // ステージ順（おまかせ）：だんだん手強い印象の属性へ
-  const STAGE_ORDER = ['grass', 'water', 'fire', 'electric', 'sky', 'rock', 'ice', 'poison', 'steel', 'bio'];
+  const STAGE_ORDER = ['space', 'grass', 'water', 'fire', 'electric', 'sky', 'rock', 'ice', 'poison', 'steel', 'bio'];
+  const songOf = n => 's' + STAGE_ORDER.indexOf(themeOf(n).key); // うちゅう=s0、くさ=s1 …
   const themeOf = n => THEMES.find(t => t.key === STAGE_ORDER[(n - 1) % STAGES]);
 
   // ---- 調整できる値（初期値） ----
@@ -671,6 +699,7 @@
       // root=基準音(MIDI) prog=8小節のコード(音階の度数) lead=旋律の矩形波デューティ bass=ベースの刻み方
       const SONGS = {
         title:  { lv: 0.881, root: 60, mode: 'major',      bpm: 140, prog: [1, 5, 6, 4, 1, 5, 4, 5], lead: 0.25,  bass: 'oct',   drums: 'four',  arp: true,  seed: 11 },
+        s0:     { lv: 1.567, genre: 'space',    root: 57, mode: 'lydian',     bpm: 108, prog: [1, 6, 4, 5, 1, 6, 2, 5], seed: 7 },   // うちゅう：スペースシンセ
         s1:     { lv: 2.158, genre: 'ambient',  root: 55, mode: 'lydian',     bpm: 84,  prog: [1, 4, 1, 5, 6, 4, 2, 5], seed: 21 },  // くさ：アンビエント
         s2:     { lv: 1.783, genre: 'lofi',     root: 62, mode: 'dorian',     bpm: 82,  prog: [1, 4, 1, 4, 6, 5, 4, 5], seed: 32 },  // みず：チル／Lo-fi
         s3:     { lv: 1.0, genre: 'dnb',      root: 57, mode: 'minor',      bpm: 174, prog: [1, 6, 7, 1, 1, 6, 4, 5], seed: 43 },  // ほのお：ドラムンベース
@@ -1084,6 +1113,18 @@
       const chord = st => song.chords[Math.floor(st / 16)];
       const root = st => chord(st)[0] - 24;
       const GENRES = {
+        // うちゅう：スペースシンセ。広がるパッド、きらめくアルペジオ、深いサブベース、柔らかいビート
+        space(st, t, six) {
+          const k = st % 16, c = chord(st), bar = Math.floor(st / 16);
+          if (k === 0) { pad(c.map(m => m - 12), t, six * 16, 0.07, 1400, six * 4); subBass(root(st) - 12, t, six * 16, 0.16); }
+          const arp = [0, 1, 2, 1, 2, 0, 1, 2];
+          voice(0.25, c[arp[k % 8]] + 12 + (k >= 8 ? 12 : 0), t, six * 0.7, 0.035, { lp: 2600 + 1200 * Math.sin(st / 12), pan: (k % 2 ? 0.45 : -0.45) });
+          if (bar >= 2) { if (k % 8 === 0) kickX(t, 0.6, 120, 40, 0.2); if (k === 4 || k === 12) clap(t, 0.18); if (k % 2 === 1) hatX(t, 0.04); }
+          const l = lead(st);
+          if (l && bar >= 4) voice('sine', l[0] + 12, t, l[1] * six * 0.9, 0.07, { lp: 4000 });
+          if (k === 15 && Math.random() < 0.5) bell(c[2] + 24, t, 0.04, 2.2, 0.6);
+          if (fever && k % 4 === 3) osc('sine', 1800, 3600, t, 0.12, 0.02, duck); // ピュン
+        },
         // くさ：アンビエント。ゆったりしたパッド、マリンバの旋律、オルゴールのきらめき、鳥のさえずり
         ambient(st, t, six) {
           const k = st % 16, c = chord(st);
@@ -1973,7 +2014,7 @@
   }
 
   // ステージが進むほどブロックが硬くなる（第10ステージで約2倍）
-  const hpScaleOf = n => 1 + 0.11 * (n - 1);
+  const hpScaleOf = n => n <= 1 ? 0.75 : 1 + 0.1 * (n - 2); // うちゅう（練習）は柔らかめ
   // 段の深さ（0=一番奥 1=一番手前）からHPを決める（6段のときの HP_BY_ROW と同じ）
   function hpAtDepth(f) {
     const x = f * (HP_BY_ROW.length - 1), i = Math.min(Math.floor(x), HP_BY_ROW.length - 2);
@@ -1993,6 +2034,33 @@
   const sizeTune = () => SIZE_TUNE[brickK()] || { hp: 1, item: 1 };
   let aliveCount = 0; // 残っているブロックの数（毎回数え直さない）
   let colsInStage = COLS, brickGrid = [], brickTop = 0, brickRowH = 1, brickColW = 1, brickSide = 6, rowOff = [];
+  // ---- 迷路（W=壊せない鉄板）。下の段から先に降りてくる。通路は1マス幅 ----
+  const MAZE_STAGES = { steel: 1, poison: 1, electric: 1 };
+  const MAZES = [
+    [ // 部屋：真ん中の細い通路から入る
+      "W11I11W",
+      "W1HHH1W",
+      "W11111W",
+      "WWW.WWW",
+      "..W.W..",
+      "..W.W..",
+    ],
+    [ // 左右に分かれる通路
+      "1W1I1W1",
+      "1W111W1",
+      "1WW.WW1",
+      "1W...W1",
+      "1W.W.W1",
+      "...W...",
+    ],
+    [ // ジグザグ
+      "I11W11I",
+      "WW1W1WW",
+      "...W...",
+      "W.WWW.W",
+      "W.....W",
+    ],
+  ];
   // ---- 特殊ブロック ----
   //  big   : 大きい（1マス分を1個で。HPはまとめた分より少し低め）
   //  small : 小さい（当たり判定も小さく、HPは低い）
@@ -2002,7 +2070,22 @@
   //  split : 壊すと小さいブロック4つに分かれる
   //  chest : 宝箱。少し硬いが必ずアイテムが出る
   const KIND_HP = { big: 0.8, bomb: 0.3, split: 0.5, chest: 1.2, wall: 1, bumper: 1 };
-  const KIND_COLOR = { wall: '#6f7486', bumper: '#ff5fd2', bomb: '#ff3b3b', chest: '#c8862b', split: '#2fe0c0' };
+  const KIND_COLOR = { wall: '#6f7486', bumper: '#ff5fd2', bomb: '#ff3b3b', chest: '#c8862b', split: '#2fe0c0', giant: '#8d6e63' };
+  const bossHpOf = n => Math.round((1000 + 330 * (n - 1)) * (n === STAGES ? 1.5 : 1) * 2);
+  // いわ：ボス級の巨大岩を3個（横3マス×縦5マス、HPはボスの約4割）
+  function placeGiants(f, lay) {
+    const segRows = LAYOUTS.rock.length, per = Math.floor(lay.length / segRows);
+    const segs = [1, 2, 3].filter(i => i < per);
+    for (const seg of segs) {
+      const r0 = seg * segRows + (Math.random() * (segRows - 4) | 0), c0 = Math.random() * (COLS - 2) | 0;
+      const r = r0 * f, c = c0 * f, rs = 5 * f, cs = 3 * f; // 横3マス×縦5マス（ボスと同じくらいの大きさ）
+      for (const b of bricks) if (b.r < r + rs && b.r + b.rs > r && b.c < c + cs && b.c + b.cs > c) b.gone = true;
+      bricks = bricks.filter(b => !b.gone);
+      const hp = Math.round(bossHpOf(stage) * 0.4);
+      bricks.push({ r, c, rs, cs, or: r0, type: '1', kind: 'giant', alive: true, color: KIND_COLOR.giant, hp, maxHp: hp,
+        cracks: makeCracks(), hitT: 0, revived: true, reviveT: 0, lastHit: 0 });
+    }
+  }
   const SOLID = { wall: 1, bumper: 1 };
   const countable = b => !SOLID[b.kind];
   let brickTotal = 0;
@@ -2020,7 +2103,11 @@
     bricks = []; brickScroll = 0; scrollPause = 0;
     const theme = themeOf(stage), k = hpScaleOf(stage), f = subdiv();
     // 配置図を縦に5回重ねる（ブロック量と長さが5倍。上ほど後から降りてきて硬い）
-    const base = LAYOUTS[theme.key], lay = Array.from({ length: STACK }, () => base).flat();
+    const base = LAYOUTS[theme.key];
+    // はがね・どく・でんき：配置図の間に、壊せない鉄板の迷路（細い通路の奥に宝）を挟む
+    const lay = MAZE_STAGES[theme.key]
+      ? Array.from({ length: STACK }, (_, i) => i % 2 ? MAZES[(i >> 1) % MAZES.length] : base).flat()
+      : Array.from({ length: STACK }, () => base).flat();
     stackRows0 = base.length * f; // 最初に見えている段数（元の1ステージ分）
     rowsInStage = lay.length * f;
     colsInStage = COLS * f;
@@ -2033,7 +2120,7 @@
       const kinds = [];
       for (let c0 = 0; c0 < COLS; c0++) {
         const t = row[c0];
-        kinds[c0] = (t === '.' || t === 'I' || t === 'P' || rowStr.startsWith('>') || r0 < 1) ? null : rollKind();
+        kinds[c0] = t === 'W' ? 'wall' : (t === '.' || t === 'I' || t === 'P' || rowStr.startsWith('>') || r0 < 1) ? null : rollKind();
         if (!kinds[c0]) continue;
         const k2 = kinds[c0];
         if (k2 === 'small') continue; // 小さいブロックは下の通常処理で作る
@@ -2062,6 +2149,7 @@
       }
     });
     for (const b of bricks) { b.rs = b.rs || 1; b.cs = b.cs || 1; }
+    if (theme.key === 'rock') placeGiants(f, lay);
     brickTotal = bricks.filter(countable).length;
     aliveCount = brickTotal;
     // 金色ブロック：各ステージ30%で1個（硬め）
@@ -2119,8 +2207,9 @@
     eff.barrier += upN('barrier');
     if (upN('mag')) eff.magnet = 1;
     combo = 0; comboT = 0;
+    pickHint(themeOf(n).key);
     buildBg(themeOf(n));
-    SFX.music.play('s' + n);
+    SFX.music.play(songOf(n));
     const t = themeOf(n);
     banner = { text: `STAGE ${n}`, sub: t.name, color: t.accent, life: 2.2 };
   }
@@ -2212,6 +2301,7 @@
     startDrag(e); // 指が増えても、今の位置から続けて動かせるよう基準を取り直す
     fingers = countFingers(e);
     fingerDown = true;
+    if (state === 'ready' && hintT > 0) { hintT = 0; return; } // ヒント表示中のタップは閉じるだけ
     if (state === 'ready') { launch(); SFX.paddle(0.5, 0, 0); }
     else if (state === 'over' || state === 'allClear') openResult();
   }
@@ -2417,6 +2507,8 @@
     updateBg(dt);
     if (state === 'title') return;
     SFX.ballCount(balls.length);
+    if (hintT > 0 && !banner) hintT -= dt;
+    if (itemTipT > 0) itemTipT -= dt;
     if (hitStopCool > 0) hitStopCool -= dt;
     if (comboT > 0 && state === 'play') { comboT -= dt; if (comboT <= 0) endCombo(); }
     if (shakeT > 0) shakeT -= dt;
@@ -2709,6 +2801,7 @@
   // ブロックにダメージ。倒したら true
   function damageBrick(b, raw, source, power) {
     if (!b.alive) return false;
+    if (b.kind === 'giant') raw = Math.min(raw, source === 'ball' ? Math.max(150, ballDamage()) : 60); // 爆弾やフィーバーで一撃にはしない
     if (SOLID[b.kind]) { // 壊せない
       b.hitT = 1;
       if (source === 'ball') { if (b.kind === 'bumper') bumperHit(b); else SFX.clank(); }
@@ -2739,6 +2832,7 @@
     SFX.brick(b.r, power || 0.6, chain + Math.floor(combo / 10), true); // コンボが伸びるほど音も高く
     if (source === 'ball' && speedOf() >= H * CFG.beamSpeed) doHitStop(0.04); // 高速で撃ち抜いた瞬間
     if (b.gold) goldBreak(b);
+    if (b.kind === 'giant') giantBreak(b);
     if (b.kind === 'bomb') bombBlast(b);
     else if (b.kind === 'split') splitBrick(b);
     else if (b.kind === 'chest') { dropItem(b); addPopup(b.x + b.w / 2, b.y, '宝箱！', '#ffd23f'); }
@@ -2769,6 +2863,18 @@
     b.hitT = 1;
     SFX.bumper();
     score += 10;
+  }
+  // 巨大岩を壊した：大爆発＋大量スコア＋アイテム3個
+  function giantBreak(b) {
+    const bonus = Math.ceil(8000 * stage * scoreMult());
+    score += bonus;
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    for (let i = 0; i < 5; i++) explode(cx + (Math.random() - 0.5) * b.w, cy + (Math.random() - 0.5) * b.h);
+    for (let i = 0; i < 3; i++) dropItem({ x: b.x + b.w * (0.2 + 0.3 * i), y: b.y, w: 0, h: b.h });
+    addPopup(W / 2, H * 0.4, '巨岩粉砕！！', '#ffb74d', 30);
+    addPopup(W / 2, H * 0.4 + 34, `+${bonus.toLocaleString()}`, '#fff3c4', 24);
+    SFX.bomb(); SFX.jackpot();
+    hitStopCool = 0; doHitStop(0.18);
   }
   // 爆弾：自分の大きさの約2倍の範囲を一気に吹き飛ばす（爆弾は連鎖）
   function bombBlast(b) {
@@ -2890,6 +2996,69 @@
   }
 
   // ---- アイテム ----
+  // ---- ヒント（ステージ開始時に約3秒。タップで先へ。まだ見ていないものを優先） ----
+  const HINTS = [
+    'パドルを横に擦って打つと、ボールに回転がかかる。回転するとボールが加速するぞ！',
+    'パドルを上に振りながら打つと強打！ボールが速いほど威力が上がる',
+    'パドルを下に振りながら打つと、ボールを減速できる',
+    'ボールが十分速くなるとビーム状態に。ブロックをまとめて貫通するぞ',
+    'iPhoneを振ると周りの壁が揺れる！揺れた壁で跳ね返ったボールは回転MAX・威力MAX',
+    'MAG（マグネット）を取ったら、二本指でタッチしている間ボールをくっつけて引き寄せられる',
+    'パドル中央の黄色いコックピットにブロックが当たるとクラッシュ！左右の青い部分は大丈夫',
+    '左上の ⏪ を押している間、時間を巻き戻せる。ミスしても取り返せるぞ',
+    'ブロックを壊し続けるとコンボ！10コンボごとにスコア倍率が上がる',
+    '金色のブロックを壊すとJACKPOT！ボールが一気に50個増える',
+    '赤い爆弾ブロックは周りを巻き込んで爆発。爆弾同士は連鎖する',
+    '茶色の宝箱ブロックを壊すと、必ずアイテムが出る',
+    'ピンクの丸いバンパーに当てると、ボールが一気に加速する',
+    '灰色の鉄板ブロックは壊せない。通路を通してボールを奥へ送り込め',
+    'ボスの弾がコックピットに当たるとしびれる。ボールで弾を消せるぞ',
+    'ステージをクリアするたびに、パワーアップを1つ選べる。ゲームオーバーまで続く',
+    'ボールがたくさんある時は、1個落ちてもミスにならない',
+    'ラリーを続けてゲージを溜めるとフィーバー！その間はボールが落ちない',
+    '「透明」はハズレアイテム。しばらくパドルが見えなくなる',
+    'パドルは画面のかなり上の方まで動かせる。ブロックの隙間に潜り込んで狙い撃ちだ',
+  ];
+  const STAGE_HINTS = {
+    space: 'うちゅう：まずは練習。横に擦って回転、上に振って強打を試してみよう',
+    grass: 'くさ：削ったブロックは少しずつ回復する。一気に壊そう',
+    water: 'みず：画面中央の水流でボールが流される。向きは時々変わる',
+    fire: 'ほのお：ブロックを壊すと周りに燃え移ってダメージ',
+    electric: 'でんき：壊すと他のブロックに放電。鉄板の迷路の奥を狙え',
+    sky: 'ひこう：時々吹く横風でボールが流される',
+    rock: 'いわ：ブロックが硬い。超巨大な岩も…本当に壊せるのか？',
+    ice: 'こおり：壁で回転がつかず、ボールがよく曲がる',
+    poison: 'どく：緑の毒ブロックに当てると、しばらく威力が半分に。迷路にも注意',
+    steel: 'はがね：とても硬い。速いボールで叩き込もう。鉄板の迷路の奥に宝',
+    bio: 'せいぶつ：倒したブロックが復活し、削れたブロックも回復する',
+  };
+  const ITEM_HINTS = {
+    wide: 'WIDE：パドルが広がる。重ねて取ると3段階まで',
+    power: 'POW：しばらくボールの威力アップ',
+    spin: 'SPIN：ボールに強い回転がかかる',
+    slow: 'SLOW：ボールが少し遅くなって打ちやすく',
+    barrier: 'BARRIER：画面の下で1回ボールを跳ね返す。重ねて取れる',
+    oneup: '1UP：残機が1つ増える',
+    multi2: '×2：ボールが2倍に増える', multi3: '×3：ボールが3倍に増える', multi5: '×5：ボールが5倍に増える', multi10: '×10：ボールが10倍に増える',
+    magnet: 'MAG：二本指でタッチしている間、ボールをくっつけて引き寄せる（ボールが紫になる）',
+    ghost: '透明：ハズレ。しばらくパドルが見えなくなる（窓だけ見える）',
+  };
+  const HINT_KEY = 'spinsmash-hints-seen';
+  let hintSeen = {};
+  try { hintSeen = JSON.parse(localStorage.getItem(HINT_KEY) || '{}'); } catch (e) {}
+  const markSeen = k => { hintSeen[k] = 1; try { localStorage.setItem(HINT_KEY, JSON.stringify(hintSeen)); } catch (e) {} };
+  let hintText = '', hintT = 0, itemTip = '', itemTipT = 0;
+  const HINT_TIME = 3.2;
+  function pickHint(key) {
+    let k = 'stage:' + key;
+    if (!STAGE_HINTS[key] || hintSeen[k]) {
+      const unseen = HINTS.map((_, i) => i).filter(i => !hintSeen['g' + i]);
+      const i = unseen.length ? unseen[0] : Math.random() * HINTS.length | 0;
+      k = 'g' + i; hintText = HINTS[i];
+    } else hintText = STAGE_HINTS[key];
+    markSeen(k);
+    hintT = HINT_TIME;
+  }
   const ITEMS = [
     { id: 'wide',    label: 'WIDE',    color: '#4dd8ff', w: 22 },
     { id: 'power',   label: 'POW',     color: '#ff4d6d', w: 18 },
@@ -2954,6 +3123,7 @@
     if (eff.wide <= 0) eff.wideLv = 0;
   }
   function applyItem(it) {
+    if (ITEM_HINTS[it.id] && !hintSeen['item:' + it.id]) { markSeen('item:' + it.id); itemTip = ITEM_HINTS[it.id]; itemTipT = 3; }
     if (it.id === 'wide') { eff.wideLv = Math.min(3, eff.wideLv + 1); eff.wide = 15; } // 取るたびに一段広がり、時間も15秒に戻る
     if (it.id === 'power') eff.power = 12;
     if (it.id === 'barrier') eff.barrier = Math.min(99, eff.barrier + 1); // 取るたびに増える
@@ -3057,6 +3227,7 @@
   // ---- ボス ----
   // shot: n=弾数 spread=広がり(rad) speed=速さ(画面高さ/秒) aim=パドル狙い wobble=揺れ grav=重力 homing=追尾 warn=予告(秒)
   const BOSSES = {
+    space:    { name: 'ギャラクシーUFO',    shot: { n: 2, spread: 0.4,  speed: 0.28, size: 6,  color: '#9dfcff' } },
     grass:    { name: 'フロラ・グランデ',   shot: { n: 3, spread: 0.35, speed: 0.35, size: 6,  color: '#b6ff7a' } },
     water:    { name: 'アクアジェリー',     shot: { n: 4, spread: 0.6,  speed: 0.22, size: 9,  color: '#8fd8ff', wobble: 1 } },
     fire:     { name: 'イグニス',           shot: { n: 1, spread: 0,    speed: 0.5,  size: 9,  color: '#ff7a1a', aim: true, burst: 3 } },
@@ -3072,7 +3243,7 @@
 
   function spawnBoss() {
     const key = themeOf(stage).key, last = stage === STAGES;
-    const hp = Math.round((1000 + 330 * (stage - 1)) * (last ? 1.5 : 1) * 2); // ステージが3倍長くなったぶん2倍
+    const hp = bossHpOf(stage); // ステージが長くなったぶん2倍
     boss = { key, name: BOSSES[key].name, hp, maxHp: hp, t: 0, hitT: 0, inv: 0, fireT: 2.5, burstLeft: 0,
       w: W * (last ? 0.56 : 0.46), h: H * (last ? 0.18 : 0.15), x: W / 2, y: 0, enter: 1 };
     boss.baseY = top + 26 + boss.h / 2;
@@ -3240,6 +3411,19 @@
     ctx.lineJoin = 'round';
     const P = (fn) => { ctx.beginPath(); fn(); };
     switch (b.key) {
+      case 'space': { // UFO：ドーム＋円盤＋回る灯り＋下からの光
+        ctx.fillStyle = 'rgba(157,252,255,0.12)';
+        P(() => { ctx.moveTo(-w * 0.18, h * 0.15); ctx.lineTo(w * 0.18, h * 0.15); ctx.lineTo(w * 0.32, h * 0.6); ctx.lineTo(-w * 0.32, h * 0.6); ctx.closePath(); }); ctx.fill();
+        ctx.fillStyle = 'rgba(160,240,255,0.55)'; P(() => ctx.ellipse(0, -h * 0.12, w * 0.2, h * 0.32, 0, Math.PI, 0)); ctx.fill();
+        ctx.fillStyle = '#8f9bb8'; P(() => ctx.ellipse(0, 0, w * 0.5, h * 0.2, 0, 0, Math.PI * 2)); ctx.fill();
+        ctx.fillStyle = '#c9d3ea'; P(() => ctx.ellipse(0, -h * 0.04, w * 0.46, h * 0.1, 0, 0, Math.PI * 2)); ctx.fill();
+        for (let i = 0; i < 8; i++) {
+          const a = i / 8 * Math.PI * 2 + t * 2, lx = Math.cos(a) * w * 0.4;
+          if (Math.sin(a) < 0) continue;
+          ctx.fillStyle = angry ? '#ff5252' : ['#ffd23f', '#7cff8a', '#4dd8ff'][i % 3];
+          P(() => ctx.arc(lx, h * 0.05, h * 0.05, 0, Math.PI * 2)); ctx.fill();
+        }
+        break; }
       case 'grass': { // 巨大な花
         for (let i = 0; i < 10; i++) {
           const a = i / 10 * Math.PI * 2 + t * 0.4;
@@ -3406,6 +3590,17 @@
     } else if (b.kind === 'split') { // 分裂：十字の割れ目
       ctx.strokeStyle = 'rgba(0,40,40,0.7)'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(cx, y + 1); ctx.lineTo(cx, y + h - 1); ctx.moveTo(x + 1, cy); ctx.lineTo(x + w - 1, cy); ctx.stroke();
+    } else if (b.kind === 'giant') { // 巨大岩：ゴツゴツした面と大きなヒビ
+      ctx.save(); roundRect(x, y, w, h, 10); ctx.clip();
+      const R = rngOf(b.r * 31 + b.c);
+      for (let i = 0; i < 14; i++) { ctx.fillStyle = `rgba(${R() < 0.5 ? '0,0,0' : '255,255,255'},${0.08 + R() * 0.1})`; ctx.beginPath(); ctx.arc(x + R() * w, y + R() * h, 6 + R() * 18, 0, Math.PI * 2); ctx.fill(); }
+      const nC = Math.ceil((1 - ratio) * 6);
+      ctx.strokeStyle = 'rgba(30,15,10,0.9)'; ctx.lineWidth = 2.5;
+      for (let k = 0; k < nC; k++) { let px = x + R() * w, py = y; ctx.beginPath(); ctx.moveTo(px, py); for (let j = 0; j < 5; j++) { px += (R() - 0.5) * w * 0.25; py += h / 5; ctx.lineTo(px, py); } ctx.stroke(); }
+      ctx.restore();
+      ctx.strokeStyle = '#d7ccc8'; ctx.lineWidth = 2; roundRect(x + 1, y + 1, w - 2, h - 2, 10); ctx.stroke();
+      ctx.save(); ctx.fillStyle = '#fff'; ctx.font = `900 ${Math.max(10, h * 0.16) | 0}px -apple-system, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(`${Math.ceil(b.hp)}`, cx, cy); ctx.restore();
     } else if (b.kind === 'big') { // 大きい：太い縁取り
       ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 2; ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
     }
@@ -4040,9 +4235,10 @@
     drawExtras();
     drawBossBar();
 
+    drawHints();
     let msg = null, sub = null;
     if (paused)                 { msg = 'PAUSE'; sub = panelOpen ? '⚙ で閉じると再開' : '右上の ▶ で再開'; }
-    else if (state === 'ready' && !banner) { msg = 'タップで発射'; sub = '横に擦ると回転・上に振ると強打・下に振ると減速'; }
+    else if (state === 'ready' && !banner && hintT <= 0) { msg = 'タップで発射'; sub = '横に擦ると回転・上に振ると強打・下に振ると減速'; }
     else if (state === 'over')  { msg = 'GAME OVER'; sub = `SCORE ${score} / 最高 ${bestRally} ラリー / タップでタイトルへ`; }
     else if (state === 'allClear') { msg = 'ALL CLEAR!!'; sub = `SCORE ${score} / タップでタイトルへ`; }
     if (msg) {
@@ -4054,6 +4250,36 @@
       ctx.fillStyle = 'rgba(255,255,255,0.65)';
       ctx.font = '13px -apple-system, "Hiragino Sans", sans-serif';
       ctx.fillText(sub, W / 2, H * 0.58 + 30);
+    }
+  }
+
+  // ヒントのカード（文字を折り返して表示）
+  function wrapText(text, maxW) {
+    const lines = []; let cur = '';
+    for (const ch of text) { if (ctx.measureText(cur + ch).width > maxW && cur) { lines.push(cur); cur = ch; } else cur += ch; }
+    if (cur) lines.push(cur);
+    return lines;
+  }
+  function drawHintCard(title, text, y, a, frac, col) {
+    ctx.save(); ctx.globalAlpha = a;
+    ctx.font = '600 14px -apple-system, "Hiragino Sans", sans-serif';
+    const bw = Math.min(W - 32, 360), lines = wrapText(text, bw - 28), bh = 40 + lines.length * 20;
+    const x = (W - bw) / 2;
+    ctx.fillStyle = 'rgba(12,14,32,0.88)'; roundRect(x, y, bw, bh, 12); ctx.fill();
+    ctx.strokeStyle = col; ctx.lineWidth = 1.5; roundRect(x, y, bw, bh, 12); ctx.stroke();
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillStyle = col; ctx.font = '800 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(title, x + 14, y + 10);
+    ctx.fillStyle = '#ffffff'; ctx.font = '600 14px -apple-system, "Hiragino Sans", sans-serif';
+    lines.forEach((l, i) => ctx.fillText(l, x + 14, y + 30 + i * 20));
+    if (frac != null) { ctx.fillStyle = col; ctx.fillRect(x + 12, y + bh - 5, (bw - 24) * frac, 2); }
+    ctx.restore();
+  }
+  function drawHints() {
+    if (state === 'ready' && hintT > 0 && !banner && !paused) {
+      drawHintCard('💡 HINT　（タップで閉じる）', hintText, H * 0.5, Math.min(1, hintT / 0.3, (HINT_TIME - hintT) / 0.2 + 0.2), hintT / HINT_TIME, '#ffd23f');
+    }
+    if (itemTipT > 0 && state === 'play') {
+      drawHintCard('NEW ITEM', itemTip, H * 0.62, Math.min(1, itemTipT / 0.4), null, '#7df9ff');
     }
   }
 
@@ -4147,7 +4373,7 @@
   {
     const box = makeSection('サウンドテスト', sliderBox);
     const list = [['title', 'タイトル']];
-    for (let n = 1; n <= STAGES; n++) list.push(['s' + n, `${n} ${themeOf(n).name}`]);
+    for (let n = 1; n <= STAGES; n++) list.push([songOf(n), `${n} ${themeOf(n).name}`]);
     list.push(['boss', 'ボス'], ['last', 'ラスボス'], ['j:clear', 'クリア'], ['j:over', 'ゲームオーバー'], ['j:allclear', 'オールクリア']);
     const grid = document.createElement('div'); grid.className = 'songBtns';
     const btns = [];
@@ -4205,7 +4431,7 @@
     if (!open) { // サウンドテストのあと、今の場面の曲に戻す
       soundTestBtns.forEach(x => x.classList.remove('on'));
       if (state === 'title') SFX.music.play('title');
-      else if (state === 'play' || state === 'ready') SFX.music.play(boss ? (stage === STAGES ? 'last' : 'boss') : 's' + stage);
+      else if (state === 'play' || state === 'ready') SFX.music.play(boss ? (stage === STAGES ? 'last' : 'boss') : songOf(stage));
       else SFX.music.stop();
       SFX.music.pause(paused);
     }
@@ -4557,7 +4783,7 @@
     boss = sn.boss ? { ...sn.boss } : null;
     shots = sn.shots.map(x => ({ ...x }));
     moveBricks(0);
-    if (state === 'play' || state === 'ready') SFX.music.play(boss ? (stage === STAGES ? 'last' : 'boss') : 's' + stage);
+    if (state === 'play' || state === 'ready') SFX.music.play(boss ? (stage === STAGES ? 'last' : 'boss') : songOf(stage));
     SFX.music.setFever(fever > 0);
   }
   // ボールは数値の配列に詰めて記録（数が多くても軽い）
