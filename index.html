@@ -71,6 +71,15 @@
   .tabs button { flex: 1; padding: 8px 0; border: 0; border-radius: 8px; background: #2b3560; color: #fff; font-size: 13px; }
   .tabs button.on { background: linear-gradient(90deg, #ff4d6d, #4dd8ff); font-weight: bold; }
   #rankList li .nm { width: 6.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #upUI { position: fixed; inset: 0; z-index: 44; background: rgba(0,0,0,0.55); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 20px; }
+  #upUI h2 { margin: 0; color: #fff27a; font: 900 22px -apple-system, "Hiragino Sans", sans-serif; letter-spacing: .06em; }
+  #upUI .upNote { color: #c8d0f0; font-size: 12px; margin-bottom: 4px; }
+  #upUI .upCard { width: min(84vw, 340px); padding: 14px 16px; border: 2px solid rgba(255,255,255,0.25); border-radius: 14px; background: rgba(25,30,60,0.92); color: #fff; text-align: left; font-family: -apple-system, "Hiragino Sans", sans-serif; touch-action: manipulation; }
+  #upUI .upCard b { display: block; font-size: 17px; margin-bottom: 3px; }
+  #upUI .upCard span { font-size: 12px; color: #b8c2ea; }
+  #upUI .upCard i { float: right; font-style: normal; font-size: 11px; color: #ffd23f; }
+  #upUI .upHave { color: #9aa6d6; font-size: 11px; max-width: 340px; text-align: center; line-height: 1.6; }
+  .resGap { font-size: 13px; color: #ffd23f; margin: -4px 0 10px; line-height: 1.5; }
   #resultUI { position: fixed; inset: 0; z-index: 45; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
   .resScore { font-size: 15px; margin: 6px 0 12px; line-height: 1.6; }
   .resScore b { font-size: 26px; }
@@ -160,7 +169,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.04</div>
+    <div id="ver">ver 0.0.05</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -193,10 +202,17 @@
       <button id="rankClose">とじる</button>
     </div>
   </div>
+  <div id="upUI" class="hidden">
+    <h2>パワーアップを選ぼう</h2>
+    <div class="upNote">ゲームオーバーまで続きます（重ねて取ると効果アップ）</div>
+    <div id="upCards"></div>
+    <div class="upHave" id="upHave"></div>
+  </div>
   <div id="resultUI" class="hidden">
     <div class="rankBox">
       <h2 id="resTitle">GAME OVER</h2>
       <div class="resScore" id="resScore"></div>
+      <div class="resGap" id="resGap"></div>
       <div id="resForm">
         <input id="nameInput" maxlength="10" placeholder="なまえ（10文字まで）" autocomplete="nickname" enterkeyhint="send">
         <div class="resBtns"><button id="sendBtn">ランキングに送信</button><button id="skipBtn" class="sub">送信しない</button></div>
@@ -1493,6 +1509,21 @@
         osc('triangle', 500, 1400, t, 0.08, 0.25);
         whoosh(t + 0.01, 1, 1.4, 0);
       },
+      // コンボ10ごと：段々高くなる「ピロン」
+      comboUp(level) {
+        if (!ok('comboUp', 80)) return;
+        const t = now(), f = 660 * Math.pow(2, Math.min(level - 1, 12) / 12 * 2);
+        osc('square', f, f, t, 0.08, 0.12); osc('square', f * 1.5, f * 1.5, t + 0.07, 0.12, 0.12);
+        osc('sine', f * 3, f * 3, t + 0.07, 0.2, 0.05);
+      },
+      // 金色ブロック：ジャラジャラ＋ファンファーレ風
+      jackpot() {
+        if (!ok('jackpot', 300)) return;
+        const t = now();
+        [523, 659, 784, 1047, 1319].forEach((f, i) => osc('square', f, f, t + i * 0.06, 0.18, 0.13));
+        for (let i = 0; i < 14; i++) osc('sine', 2500 + Math.random() * 2500, 3000 + Math.random() * 3000, t + 0.05 + i * 0.035, 0.08, 0.05);
+        osc('sine', 110, 55, t, 0.4, 0.35, drive);
+      },
       zap() {
         if (!ok('zap', 80)) return;
         const t = now();
@@ -1656,6 +1687,34 @@
   let touchStartY = 0, paddleStartY = 0;
   // 演出用
   let rally = 0, chain = 0, bestRally = 0;
+  // ---- パワーアップ（ステージクリアごとに3択・ゲームオーバーまで累積） ----
+  const UPGRADES = [
+    { id: 'dmg',     name: '攻撃力アップ',     desc: 'ボールのダメージ +25%' },
+    { id: 'item',    name: 'アイテム運',       desc: 'アイテムが出やすくなる（+40%）' },
+    { id: 'wide',    name: 'パドル拡張',       desc: 'パドルの幅 +15%' },
+    { id: 'split',   name: '分裂',             desc: 'ブロックを壊すと4%でボールが1個増える' },
+    { id: 'boom',    name: '爆裂',             desc: '壊したブロックの周りにも小さな爆発ダメージ' },
+    { id: 'life',    name: '残機 +1',          desc: 'その場で残機が1つ増える' },
+    { id: 'combo',   name: 'コンボ持続',       desc: 'コンボが切れるまでの時間 +2秒' },
+    { id: 'score',   name: 'スコアアップ',     desc: '獲得スコア +20%' },
+    { id: 'barrier', name: '常備バリア',       desc: '各ステージの開始時にバリア +1' },
+    { id: 'mag',     name: '常備マグネット',   desc: '各ステージの開始時にMAG状態', once: true },
+  ];
+  let up = {};
+  const upN = id => up[id] || 0;
+  // ---- コンボ：壊すたび+1。一定時間壊さないかミスで切れる。10コンボごとに倍率+0.5（最大×5） ----
+  let combo = 0, comboT = 0, bestCombo = 0;
+  const comboMult = () => Math.min(5, 1 + Math.floor(combo / 10) * 0.5);
+  const comboTime = () => 4 + 2 * upN('combo');
+  const scoreMult = () => rallyMult() * comboMult() * (1 + 0.2 * upN('score'));
+  // ---- ヒットストップ：大きな当たりの瞬間だけ一瞬止める（画面は揺らさない） ----
+  let hitStop = 0, hitStopCool = 0;
+  function doHitStop(sec) {
+    if (CFG.fx <= 0 || hitStopCool > 0) return;
+    hitStop = Math.max(hitStop, sec); hitStopCool = sec + 0.35;
+  }
+  // ---- 「あと少し」：この端末のハイスコア（ランキング対象のみ） ----
+  let hiAtStart = 0;
   let paddleGlow = 0, rallyPop = 0;
   let trail = [], particles = [], dmgTexts = [], banner = null;
   // 複数ボール：balls に全部、ball は「いま処理・描画しているボール」
@@ -1867,6 +1926,12 @@
       }
     });
     aliveCount = bricks.length;
+    // 金色ブロック：各ステージ30%で1個（硬め）
+    const cand = bricks.filter(b => b.type !== 'P' && b.type !== 'I');
+    if (cand.length && Math.random() < 0.3) {
+      const g = cand[Math.random() * cand.length | 0];
+      g.gold = true; g.color = '#ffcc00'; g.hp = g.maxHp = Math.max(3, Math.round(g.maxHp * 3));
+    }
     layoutBricks();
   }
 
@@ -1913,6 +1978,9 @@
     targetX = paddle.x;
     ball = {};
     resetBall();
+    eff.barrier += upN('barrier');
+    if (upN('mag')) eff.magnet = 1;
+    combo = 0; comboT = 0;
     buildBg(themeOf(n));
     SFX.music.play('s' + n);
     const t = themeOf(n);
@@ -1927,6 +1995,7 @@
   function newGame(startStage) {
     askMotion();
     score = 0; lives = Math.round(CFG.startLives) || LIVES; bestRally = 0; scoreSaved = false;
+    up = {}; combo = 0; comboT = 0; bestCombo = 0; hitStop = 0; hiAtStart = hiScore();
     rankedRun = isDefaultPlay() && (startStage || 1) === 1;
     setTitle(false);
     loadStage(startStage || 1);
@@ -2001,7 +2070,7 @@
     e.preventDefault();
     if (panelOpen) { setPanel(false); return; } // パネル外をタップで閉じる
     SFX.init(); // iOSは画面に触れた時に音を有効化する必要がある
-    if (paused || state === 'title' || state === 'stageClear') return;
+    if (paused || state === 'title' || state === 'stageClear' || state === 'upgrade') return;
     startDrag(e); // 指が増えても、今の位置から続けて動かせるよう基準を取り直す
     fingers = countFingers(e);
     fingerDown = true;
@@ -2210,6 +2279,8 @@
     updateBg(dt);
     if (state === 'title') return;
     SFX.ballCount(balls.length);
+    if (hitStopCool > 0) hitStopCool -= dt;
+    if (comboT > 0 && state === 'play') { comboT -= dt; if (comboT <= 0) endCombo(); }
     if (shakeT > 0) shakeT -= dt;
     if (shakeCool > 0) shakeCool -= dt;
     updateFx(dt);
@@ -2217,10 +2288,11 @@
       stageTimer -= dt;
       if (stageTimer <= 0) {
         if (stage >= STAGES) { state = 'allClear'; saveScore(); SFX.music.jingle('allclear'); }
-        else loadStage(stage + 1);
+        else openUpgrade();
       }
       return;
     }
+    if (state === 'upgrade') return; // パワーアップ選択中は止める
     moveBricks(dt);
     gimmicks(dt);
     magnetPull(dt);
@@ -2229,7 +2301,7 @@
     updateBoss(dt);
     updateShots(dt);
     // WIDE中は広がり、しびれ中は縮んで動きが鈍る
-    const wantW = W * CFG.paddleW * objK() * WIDE_MULT[eff.wide > 0 ? eff.wideLv : 0] * (eff.stun > 0 ? 0.7 : 1);
+    const wantW = W * CFG.paddleW * objK() * WIDE_MULT[eff.wide > 0 ? eff.wideLv : 0] * (eff.stun > 0 ? 0.7 : 1) * (1 + 0.15 * upN('wide'));
     paddle.w += (wantW - paddle.w) * Math.min(1, dt * 10);
     const tx = Math.min(Math.max(targetX, -paddle.w / 2), W + paddle.w / 2);
     paddle.x = eff.stun > 0 ? paddle.x + (tx - paddle.x) * Math.min(1, dt * 4) : tx;
@@ -2470,6 +2542,7 @@
       }
       ball.dead = true;
       lives--;
+      endCombo();
       // ミス（自分で下へ打ち込んだ自爆も同じ）：ドカーン＋破片
       SFX.selfDestruct();
       explode(ball.x, H - 4);
@@ -2485,6 +2558,7 @@
     let d = damageAt(speedOf());
     if (eff.power > 0) d *= 2;
     if (eff.poison > 0) d *= 0.5;
+    d *= 1 + 0.25 * upN('dmg');
     return Math.max(1, Math.round(d));
   }
   // 属性による防御（いわ・はがね）
@@ -2517,14 +2591,19 @@
     b.alive = false;
     aliveCount--;
     chain++;
-    score += Math.ceil(b.maxHp * rallyMult() * (fever > 0 ? 2 : 1));
-    SFX.brick(b.r, power || 0.6, chain, true);
+    addCombo();
+    score += Math.ceil(b.maxHp * scoreMult() * (fever > 0 ? 2 : 1));
+    SFX.brick(b.r, power || 0.6, chain + Math.floor(combo / 10), true); // コンボが伸びるほど音も高く
+    if (source === 'ball' && speedOf() >= H * CFG.beamSpeed) doHitStop(0.04); // 高速で撃ち抜いた瞬間
+    if (b.gold) goldBreak(b);
+    if (source === 'ball' && upN('split') && Math.random() < 0.04 * upN('split')) splitBall();
+    if (upN('boom') && source !== 'boom') boomAround(b);
     const s2 = speedOf() || 1;
     spawnParticles(b, -ball.vx / s2, -ball.vy / s2, 1);
     // アイテム：★ブロックは必ず、他は7%
     // アイテム：★ブロックとボス戦中は必ず。普段は残りが減るほど出やすい（最初1倍→残り0で itemBoost 倍）
     const used = bricks.length ? 1 - aliveCount / bricks.length : 0;
-    const rate = CFG.itemRate / 100 * sizeTune().item * (1 + (CFG.itemBoost - 1) * used);
+    const rate = CFG.itemRate / 100 * sizeTune().item * (1 + (CFG.itemBoost - 1) * used) * (1 + 0.4 * upN('item'));
     if (b.type === 'I' || boss || Math.random() < rate) dropItem(b);
     const key = themeOf(stage).key;
     if (key === 'bio' && !b.revived && Math.random() < 0.35) { b.reviveT = 7; }
@@ -2533,6 +2612,59 @@
     // 残りわずかになったらボス登場（残ったブロックはそのまま。アイテムも出る）
     if (!boss && !bossDone && aliveCount <= Math.floor(bricks.length * CFG.bossAt / 100)) spawnBoss();
     return true;
+  }
+
+  // ---- コンボ ----
+  function addCombo() {
+    combo++; comboT = comboTime();
+    if (combo > bestCombo) bestCombo = combo;
+    if (combo % 10 === 0) {
+      addPopup(W / 2, H * 0.45, `${combo} COMBO  ×${comboMult().toFixed(1)}`, '#ff9cf0', 22);
+      SFX.comboUp(combo / 10);
+    }
+  }
+  function endCombo() {
+    if (combo >= 10) addPopup(W / 2, H * 0.45, `${combo} COMBO おわり`, 'rgba(255,255,255,0.8)');
+    combo = 0; comboT = 0;
+  }
+  // 分裂：今のボールから1個増やす
+  function splitBall() {
+    if (balls.length >= CFG.maxBalls) return;
+    const sp = speedOf(), a = Math.atan2(ball.vy, ball.vx) + (Math.random() < 0.5 ? -0.5 : 0.5);
+    balls.push({ ...ball, trail: [], vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, stuck: null });
+  }
+  // 爆裂：周り8マスに最大HPの15%×段階のダメージ
+  function boomAround(b) {
+    const k = 0.15 * upN('boom');
+    for (let r = b.r - 1; r <= b.r + 1; r++) {
+      const row = brickGrid[r]; if (!row) continue;
+      for (let c = b.c - 1; c <= b.c + 1; c++) {
+        const n = row[c];
+        if (!n || !n.alive || n === b) continue;
+        damageBrick(n, Math.max(1, Math.round(n.maxHp * k)), 'boom');
+        if (state !== 'play') return;
+      }
+    }
+  }
+  // 金色ブロック：壊すとボール+50個・大きなスコア
+  function goldBreak(b) {
+    const bonus = Math.ceil(5000 * stage * scoreMult());
+    score += bonus;
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2, sp = Math.max(speedOf(), H * CFG.speed * 1.2);
+    for (let i = 0; i < 50 && balls.length < CFG.maxBalls; i++) {
+      const a = Math.PI * 2 * i / 50 + Math.random() * 0.1;
+      let vx = Math.cos(a) * sp, vy = Math.sin(a) * sp;
+      if (Math.abs(vy) < sp * 0.3) vy = (vy < 0 ? -1 : 1) * sp * 0.3;
+      balls.push({ ...ball, trail: [], x: cx, y: cy, vx, vy, stuck: null, extra: 0, selfHit: false, dead: false });
+    }
+    for (let i = 0; i < 40 && particles.length < 200; i++) {
+      const a = Math.random() * Math.PI * 2, v = H * (0.2 + Math.random() * 0.5);
+      particles.push({ x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.8, max: 0.8, s: 3 + Math.random() * 3, color: Math.random() < 0.5 ? '#ffd700' : '#fff6b0' });
+    }
+    addPopup(W / 2, H * 0.4, 'JACKPOT!!', '#ffd700', 34);
+    addPopup(W / 2, H * 0.4 + 38, `+${bonus.toLocaleString()}`, '#fff6b0', 26);
+    SFX.jackpot();
+    doHitStop(0.15);
   }
 
   function stageClear() {
@@ -2884,20 +3016,22 @@
     dmgTexts.push({ x: ball.x, y: ball.y - 10, text: dmg > 0 ? `${dmg}` : '0', kill: false, life: 0.7 });
     if (dmg <= 0) { SFX.clank(); return; }
     b.hp -= dmg;
-    score += Math.ceil(dmg * rallyMult() * (fever > 0 ? 2 : 1));
+    score += Math.ceil(dmg * scoreMult() * (fever > 0 ? 2 : 1));
     SFX.bossHit(power);
+    if (dmg >= b.maxHp * 0.04) doHitStop(0.06); // ボスへの大ダメージ
     if (b.hp <= 0) bossDefeated();
   }
 
   function bossDefeated() {
     const b = boss;
     SFX.bossDown();
+    hitStopCool = 0; doHitStop(0.2);
     // 残っていたブロックも一斉に爆発（スコアは入る）
     let n = 0;
     for (const k of bricks) {
       if (!k.alive) continue;
       k.alive = false; k.reviveT = 0;
-      score += Math.ceil(k.maxHp * rallyMult());
+      score += Math.ceil(k.maxHp * scoreMult());
       if (n++ < 40) spawnParticles(k, 0, 1, 0.5);
     }
     aliveCount = 0;
@@ -3049,12 +3183,26 @@
 
   // ちょっとした文字表示（アイテム名・PERFECTなど）
   let popups = [];
-  function addPopup(x, y, text, color) {
-    popups.push({ x, y, text, color, life: 0.9 });
+  function addPopup(x, y, text, color, size) {
+    popups.push({ x, y, text, color, life: size ? 1.6 : 0.9, size: size || 18 });
     if (popups.length > 12) popups.shift();
   }
 
   // ---- 描画 ----
+  // 金色ブロックのきらめき（斜めの光の帯が流れる＋外側の光）
+  function drawGoldShine(b) {
+    const t = (performance.now() / 900) % 1.6 - 0.3;
+    ctx.save();
+    ctx.shadowColor = '#ffd700'; ctx.shadowBlur = 8;
+    ctx.strokeStyle = '#fff3a0'; ctx.lineWidth = 1.5; ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+    ctx.restore();
+    ctx.save();
+    ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+    const x = b.x + b.w * t;
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.beginPath(); ctx.moveTo(x, b.y); ctx.lineTo(x + b.w * 0.15, b.y); ctx.lineTo(x + b.w * 0.15 - b.h, b.y + b.h); ctx.lineTo(x - b.h, b.y + b.h); ctx.fill();
+    ctx.restore();
+  }
   function roundRect(x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -3433,7 +3581,8 @@
     // 文字（アイテム名・PERFECT・倍率など）
     for (const p of popups) {
       ctx.globalAlpha = Math.min(1, p.life / 0.4);
-      ctx.font = '900 18px -apple-system, "Hiragino Sans", sans-serif';
+      const ps = p.size > 18 ? p.size * (1 + Math.max(0, p.life - 1.3) * 2) : p.size; // 大きい文字は弾けるように出る
+      ctx.font = `900 ${Math.round(ps)}px -apple-system, "Hiragino Sans", sans-serif`;
       ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillText(p.text, p.x + 1, p.y + 2);
       ctx.fillStyle = p.color; ctx.fillText(p.text, p.x, p.y);
     }
@@ -3481,6 +3630,26 @@
       ctx.fillStyle = 'rgba(0,0,0,0.55)'; roundRect(x, y, 42, 12, 6); ctx.fill();
       ctx.fillStyle = col; ctx.fillText(t ? `${label} ${Math.ceil(t)}` : label, x + 5, y + 6.5);
     });
+    // ヘッダー右（ハートの上）：ハイスコアまであと何点
+    ctx.textAlign = 'right';
+    if (hiAtStart > 0) {
+      ctx.font = 'bold 10px -apple-system, "Hiragino Sans", sans-serif';
+      if (score < hiAtStart) { ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillText(`HIまで あと ${(hiAtStart - score).toLocaleString()}`, W - 140, top / 2 - 10); }
+      else { ctx.fillStyle = '#ffd23f'; ctx.fillText('NEW RECORD!', W - 140, top / 2 - 10); }
+    }
+    // コンボ：画面中央に半透明で大きく（プレイの邪魔にならない濃さ）
+    if (combo >= 2) {
+      const cm = comboMult(), col = cm > 1 ? '255,156,240' : '255,255,255', cy2 = H * 0.56;
+      ctx.textAlign = 'center';
+      ctx.font = '900 30px -apple-system, "Hiragino Sans", sans-serif';
+      ctx.fillStyle = `rgba(${col},0.38)`;
+      ctx.fillText(`${combo} COMBO`, W / 2, cy2);
+      if (cm > 1) { ctx.font = '900 16px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(`×${cm.toFixed(1)}`, W / 2, cy2 + 24); }
+      const bw = 110, f = Math.max(0, comboT / comboTime());
+      ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(W / 2 - bw / 2, cy2 + 38, bw, 3);
+      ctx.fillStyle = `rgba(${col},0.5)`; ctx.fillRect(W / 2 - bw / 2, cy2 + 38, bw * f, 3);
+    }
+    ctx.textAlign = 'left';
   }
 
   function draw() {
@@ -3519,12 +3688,14 @@
         if (ratio < 1) { ctx.fillStyle = `rgba(0,0,0,${0.5 * (1 - ratio)})`; ctx.fillRect(b.x, b.y, b.w, b.h); }
         if (b.type === 'H' || b.type === 'I') { ctx.fillStyle = b.type === 'I' ? '#ffffff' : 'rgba(255,255,255,0.55)'; ctx.fillRect(b.x + b.w * 0.3, b.y + b.h * 0.3, b.w * 0.4, b.h * 0.4); }
         if (b.hitT > 0) { ctx.fillStyle = `rgba(255,255,255,${0.6 * b.hitT})`; ctx.fillRect(b.x, b.y, b.w, b.h); }
+        if (b.gold) drawGoldShine(b);
         continue;
       }
       ctx.fillStyle = b.color;
       roundRect(b.x, b.y, b.w, b.h, 3);
       ctx.fill();
       decorateBrick(b);
+      if (b.gold) drawGoldShine(b);
       roundRect(b.x, b.y, b.w, b.h, 3); // 下の暗転処理用にパスを戻す
       // 削れるほど暗く
       if (ratio < 1) {
@@ -3910,7 +4081,8 @@
     const cleared = state === 'allClear';
     state = 'result';
     document.getElementById('resTitle').textContent = cleared ? 'ALL CLEAR!!' : 'GAME OVER';
-    document.getElementById('resScore').innerHTML = `SCORE <b>${score}</b><br>STAGE ${stage}・最高 ${bestRally} ラリー`;
+    document.getElementById('resScore').innerHTML = `SCORE <b>${score}</b><br>STAGE ${stage}・最高 ${bestRally} ラリー・最大 ${bestCombo} コンボ`;
+    showGap(score);
     resNote.textContent = '';
     resOk.classList.add('hidden');
     sendBtn.disabled = skipBtn.disabled = false;
@@ -3927,6 +4099,60 @@
     resultUI.classList.remove('hidden');
   }
   function closeResult() { resultUI.classList.add('hidden'); goTitle(); }
+
+  // ---- パワーアップの3択（ステージクリア後） ----
+  const upUI = document.getElementById('upUI'), upCards = document.getElementById('upCards'), upHave = document.getElementById('upHave');
+  function openUpgrade() {
+    state = 'upgrade';
+    const pool = UPGRADES.filter(u => !(u.once && upN(u.id)) && !(u.id === 'life' && lives >= 99));
+    const pick = [];
+    while (pick.length < 3 && pool.length) pick.push(pool.splice(Math.random() * pool.length | 0, 1)[0]);
+    upCards.innerHTML = '';
+    for (const u of pick) {
+      const btn = document.createElement('button');
+      btn.className = 'upCard';
+      const lv = upN(u.id);
+      btn.innerHTML = `<i>${lv ? 'Lv' + lv + ' → ' + (lv + 1) : 'NEW'}</i><b>${u.name}</b><span>${u.desc}</span>`;
+      btn.addEventListener('click', () => chooseUpgrade(u));
+      upCards.appendChild(btn);
+    }
+    const have = UPGRADES.filter(u => upN(u.id) && u.id !== 'life').map(u => `${u.name}${upN(u.id) > 1 ? '×' + upN(u.id) : ''}`);
+    upHave.textContent = have.length ? '取得済み：' + have.join('・') : '';
+    upUI.classList.remove('hidden');
+  }
+  function chooseUpgrade(u) {
+    if (state !== 'upgrade') return;
+    up[u.id] = upN(u.id) + 1;
+    if (u.id === 'life') { lives = Math.min(99, lives + 1); SFX.oneUp(); } else SFX.item();
+    upUI.classList.add('hidden');
+    loadStage(stage + 1);
+  }
+
+  // ---- 終了時：オンラインランキングで「あと何点」 ----
+  async function showGap(myScore) {
+    const el = document.getElementById('resGap');
+    const local = hiAtStart > 0 && myScore < hiAtStart ? `自己ベストまで あと ${(hiAtStart - myScore).toLocaleString()} 点` : (hiAtStart > 0 ? '自己ベスト更新！' : '');
+    el.textContent = local;
+    if (!RANKING_URL || !rankedRun || myScore <= 0) return;
+    try {
+      const res = await fetch(RANKING_URL);
+      const data = await res.json();
+      const top = (data.top || []).map(r => Number(r.score) || 0).sort((a, b) => b - a);
+      if (state !== 'result') return;
+      const above = top.filter(x => x > myScore);
+      const rank = above.length + 1;
+      let msg;
+      if (rank === 1) msg = 'オンライン1位相当のスコア！';
+      else {
+        const next = above[above.length - 1];
+        msg = rank <= top.length || top.length < 50
+          ? `今のスコアは${rank}位相当。${rank - 1}位まで あと ${(next - myScore + 1).toLocaleString()} 点`
+          : `ランキング50位まで あと ${(top[top.length - 1] - myScore + 1).toLocaleString()} 点`;
+      }
+      el.textContent = (local ? local + '\n' : '') + msg;
+      el.style.whiteSpace = 'pre-line';
+    } catch (e) {}
+  }
   async function sendScore() {
     const name = nameInput.value.trim().slice(0, 10);
     if (!name) { resNote.textContent = '名前を入れてください'; nameInput.focus(); return; }
@@ -4074,7 +4300,7 @@
     return {
       balls: packBalls(), px: paddle.x, py: paddle.y, pw: paddle.w,
       br: bricks.map(b => [b.alive, b.hp, b.reviveT, b.revived]),
-      score, lives, state, rally, chain, stageTime, windT, bossDone,
+      score, lives, state, rally, chain, stageTime, windT, bossDone, combo, comboT,
       items: items.map(i => ({ ...i })), eff: { ...eff }, fever, feverGauge,
       boss: boss ? { ...boss } : null, shots: shots.map(x => ({ ...x })),
     };
@@ -4090,6 +4316,7 @@
     sn.br.forEach((v, i) => { const b = bricks[i]; if (b) [b.alive, b.hp, b.reviveT, b.revived] = v; });
     aliveCount = bricks.reduce((n, b) => n + (b.alive ? 1 : 0), 0);
     ({ score, lives, state, rally, chain, stageTime, windT, bossDone, fever, feverGauge } = sn);
+    combo = sn.combo || 0; comboT = sn.comboT || 0;
     items = sn.items.map(i => ({ ...i }));
     Object.assign(eff, sn.eff);
     boss = sn.boss ? { ...sn.boss } : null;
@@ -4159,6 +4386,7 @@
     last = now;
     if (!paused) {
       if (rewinding && canRewind()) rewindStep(dt);
+      else if (hitStop > 0) { hitStop -= dt; if (hitStopCool > 0) hitStopCool -= dt; } // ヒットストップ中は止める
       else { update(dt); recordHistory(); }
     }
     draw();
