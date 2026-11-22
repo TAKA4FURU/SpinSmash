@@ -170,7 +170,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.14</div>
+    <div id="ver">ver 0.0.15</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -2168,6 +2168,7 @@
     trail = ball.trail;
     eff.magnet = 0; // マグネットはミスで解除
     eff.laser = 0;  // レーザーもミスで解除
+    eff.help = 0;   // ヘルプパドルも
     ball.r = ballR();
     ball.x = Math.max(ball.r, Math.min(W - ball.r, paddle.x));
     ball.y = paddle.y - ball.r - 1;
@@ -2493,6 +2494,7 @@
     if (dmgTexts.length) dmgTexts = dmgTexts.filter(t => t.life > 0);
     for (const b of bricks) if (b.hitT > 0) b.hitT = Math.max(0, b.hitT - dt * 8);
     paddleGlow *= Math.exp(-dt * 7);
+    helpGlow *= Math.exp(-dt * 7);
     rallyPop *= Math.exp(-dt * 6);
     for (const p of particles) {
       p.vy += H * 1.6 * dt;
@@ -2762,6 +2764,18 @@
       }
     }
 
+    // ヘルプパドル：画面の一番下で自分のパドルと同じ横位置を動く。普通に跳ね返すだけ
+    if (eff.help && ball.vy > 0) {
+      const hp = helpPaddle();
+      if (ball.y + ball.r >= hp.y && ball.y - ball.r < hp.y + hp.h && Math.abs(ball.x - hp.x) <= hp.w / 2 + ball.r) {
+        const s2 = speedOf(), off = Math.max(-1, Math.min(1, (ball.x - hp.x) / (hp.w / 2)));
+        const ang = (-90 + off * 55) * Math.PI / 180; // 当たった位置で角度が変わる
+        ball.vx = Math.cos(ang) * s2; ball.vy = Math.sin(ang) * s2;
+        ball.y = hp.y - ball.r; ball.selfHit = false;
+        helpGlow = 1;
+        SFX.wall(0.7);
+      }
+    }
     // 下：バリアかフィーバー中は跳ね返る
     const floorY = H - safeBottom * 0.35;
     if (ball.vy > 0 && ball.y + ball.r >= floorY && (eff.barrier > 0 || fever > 0)) {
@@ -3050,6 +3064,7 @@
     multi2: '×2：ボールが2倍に増える', multi3: '×3：ボールが3倍に増える', multi5: '×5：ボールが5倍に増える', multi10: '×10：ボールが10倍に増える',
     magnet: 'MAG：二本指でタッチしている間、ボールをくっつけて引き寄せる（ボールが紫になる）',
     ghost: '透明：ハズレ。しばらくパドルが見えなくなる（窓だけ見える）',
+    help: 'HELP：画面の一番下にヘルプパドルが出て、自分のパドルと一緒に左右に動く。WIDEで一緒に広がる。次のミスまで',
     laser: 'LASER：ボールが小さく強い光のレーザーに！曲がらずまっすぐ高速で貫く。16個まで・次のミスまで',
     gem1: '宝石（◆銅・◆銀・◆金・◆ダイヤ）：取るとスコア。ダイヤは超高得点！',
   };
@@ -3060,7 +3075,7 @@
   let hintText = '', hintT = 0, itemTip = '', itemTipT = 0;
   const HINT_TIME = 3.2;
   // まだ説明していないアイテム（出やすい順）を最大2つ、ヒントに添える
-  const ITEM_INTRO = ['gem1', 'wide', 'power', 'barrier', 'spin', 'slow', 'multi2', 'magnet', 'laser', 'oneup', 'ghost', 'multi3', 'multi5', 'multi10'];
+  const ITEM_INTRO = ['gem1', 'wide', 'power', 'barrier', 'spin', 'slow', 'multi2', 'magnet', 'laser', 'help', 'oneup', 'ghost', 'multi3', 'multi5', 'multi10'];
   let hintItems = [];
   function pickHint(key) {
     hintItems = ITEM_INTRO.filter(id => !hintSeen['item:' + id]).slice(0, 2);
@@ -3086,7 +3101,8 @@
     { id: 'multi5',  label: '×5',      color: '#ff8c42', w: 5,  mult: 5 },
     { id: 'multi10', label: '×10',     color: '#ff5e5e', w: 2,  mult: 10 },
     { id: 'magnet',  label: 'MAG',     color: '#b388ff', w: 10 },
-    { id: 'laser',   label: 'LASER',   color: '#ff3b3b', w: 9 },  // ボールがレーザーに（次のミスまで）
+    { id: 'laser',   label: 'LASER',   color: '#ff3b3b', w: 9 },
+    { id: 'help',    label: 'HELP',    color: '#7cffcb', w: 8 },  // 画面の一番下にヘルプパドル（次のミスまで）  // ボールがレーザーに（次のミスまで）
     { id: 'ghost',   label: '透明',    color: '#3a3f55', w: 8, text: '#9aa0b8' }, // ハズレ
     // スコア用の宝石（安いほど出やすい。点数×ステージ数×倍率）
     { id: 'gem1',    label: '◆銅',     color: '#cd7f32', w: 70, gem: 1000 },
@@ -3095,7 +3111,7 @@
     { id: 'gem4',    label: '◆ダイヤ', color: '#9ff3ff', w: 8,  gem: 100000 },
   ];
   let items = [];
-  const eff = { wide: 0, wideLv: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0, laser: 0 };
+  const eff = { wide: 0, wideLv: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0, laser: 0, help: 0 };
   const LASER_MAX = 16;
   const ballCap = () => eff.laser ? LASER_MAX : CFG.maxBalls;
   const ballR = () => Math.max(2, W * 0.022 * objK()) * (eff.laser ? 0.4 : 1);
@@ -3158,6 +3174,7 @@
     if (it.id === 'power') eff.power = 12;
     if (it.id === 'barrier') eff.barrier = Math.min(99, eff.barrier + 1); // 取るたびに増える
     if (it.id === 'magnet') eff.magnet = 1;  // 次のミスまで
+    if (it.id === 'help') eff.help = 1;      // 次のミスまで
     if (it.id === 'laser') { // レーザー：小さく・まっすぐ・高速。16個を超える分は消える
       eff.laser = 1;
       balls = balls.filter(b => !b.dead).slice(0, LASER_MAX);
@@ -3934,6 +3951,28 @@
     }
   }
 
+  // ---- ヘルプパドル（アイテム HELP。次のミスまで） ----
+  let helpGlow = 0;
+  function helpPaddle() {
+    const w = W * CFG.paddleW * objK() * WIDE_MULT[eff.wide > 0 ? eff.wideLv : 0] * (1 + 0.15 * upN('wide'));
+    const h = Math.max(4, paddle.h * 0.6);
+    return { x: Math.max(-w / 2 + 10, Math.min(W + w / 2 - 10, paddle.x)), y: H - safeBottom * 0.62, w, h };
+  }
+  function drawHelpPaddle() {
+    if (!eff.help) return;
+    const p = helpPaddle(), cy = p.y + p.h / 2, a = 0.75 + 0.25 * helpGlow;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    for (const [lw, al] of [[p.h * 3, 0.12], [p.h * 1.6, 0.35], [p.h * 0.6, 0.9]]) {
+      ctx.strokeStyle = al > 0.5 ? `rgba(220,255,240,${al * a})` : `rgba(80,255,190,${al * a})`;
+      ctx.lineWidth = lw;
+      ctx.beginPath(); ctx.moveTo(p.x - p.w / 2 + p.h, cy); ctx.lineTo(p.x + p.w / 2 - p.h, cy); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.fillStyle = '#2a3a36'; roundRect(p.x - p.h * 1.6, cy - p.h * 0.7, p.h * 3.2, p.h * 1.4, p.h * 0.5); ctx.fill();
+    ctx.fillStyle = '#7cffcb'; ctx.fillRect(p.x - p.h * 0.8, cy - p.h * 0.25, p.h * 1.6, p.h * 0.5);
+  }
   // ---- 自機：中央のコックピット（金属）＋左右に伸びる光のブレード ----
   const COCKPIT = 0.2; // 自機の幅に対するコックピットの幅（敵弾・ブロックはここだけに当たる）
   // コックピットの幅は元のパドル幅から決める（WIDEやパドル拡張で伸びるのは左右のレーザーだけ）
@@ -4122,14 +4161,17 @@
     if (eff.poison > 0) chips.push(['毒', eff.poison, '#7cff3a']);
     if (eff.barrier > 0) chips.push([`BAR×${eff.barrier}`, 0, '#7df9ff']);
     if (eff.magnet > 0) chips.push(['MAG', 0, '#b388ff']);
+    if (eff.help > 0) chips.push(['HELP', 0, '#7cffcb']);
     if (eff.laser > 0) chips.push(['LASER', 0, eff.magnet > 0 ? '#b388ff' : '#ff3b3b']);
     if (eff.ghost > 0) chips.push(['透明', eff.ghost, '#9aa0b8']);
     if (balls.length > 1) chips.push([`●×${balls.length}`, 0, '#ffffff']);
     ctx.font = 'bold 10px -apple-system, sans-serif';
-    chips.forEach(([label, t, col], i) => {
-      const x = 10 + i * 46, y = boss ? top + 30 : top + 6;
-      ctx.fillStyle = 'rgba(0,0,0,0.55)'; roundRect(x, y, 42, 12, 6); ctx.fill();
-      ctx.fillStyle = col; ctx.fillText(t ? `${label} ${Math.ceil(t)}` : label, x + 5, y + 6.5);
+    let cxp = 10; // 文字の長さに合わせて並べる（重ならないように）
+    chips.forEach(([label, t, col]) => {
+      const txt = t ? `${label} ${Math.ceil(t)}` : label, cw = Math.max(36, ctx.measureText(txt).width + 10), y = boss ? top + 30 : top + 6;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; roundRect(cxp, y, cw, 12, 6); ctx.fill();
+      ctx.fillStyle = col; ctx.fillText(txt, cxp + 5, y + 6.5);
+      cxp += cw + 4;
     });
     // ヘッダー右（ハートの上）：ハイスコアまであと何点
     ctx.textAlign = 'right';
@@ -4283,6 +4325,7 @@
       ctx.strokeStyle = `rgba(212,184,255,${0.35 * ph})`; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(paddle.x, py, R * (1 - ph), 0, Math.PI * 2); ctx.stroke(); // 内側へ縮む輪
     }
+    drawHelpPaddle();
     drawPaddle();
 
     if (state !== 'over' && state !== 'allClear') {
