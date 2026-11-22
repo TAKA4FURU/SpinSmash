@@ -183,7 +183,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.20</div>
+    <div id="ver">ver 0.0.21</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -559,9 +559,9 @@
     decay:      0.5,   // 時間による回転の減衰
     maxSpin:    2.0,   // 最大回転（画面高さ比）
     // 基本
-    speed:      0.3,   // 発射時のボール速度（画面高さ/秒）
+    speed:      0.1,   // 発射時のボール速度（画面高さ/秒）。子どもやゲームに慣れていない人向けにゆっくり
     spinAccel:  1.05,  // 回転をかけて打った時の加速倍率（最大回転でこの倍率、回転の強さに比例）
-    beamSpeed:  1.0,   // ビームが出始める速度（画面高さ/秒）
+    beamSpeed:  0.6,   // ビームが出始める速度（画面高さ/秒）
     dmgScale:   1.0,   // ダメージ倍率
     bossAt:     3,     // 残りブロックがこの割合(%)以下になったらボス登場（ブロックは残る）
     bossMinSec: 4,     // ボスを倒すのに最低かかる秒数（1秒に受けるダメージを 最大HP÷この秒数 までに制限）
@@ -581,7 +581,7 @@
     brickScale: 0.25,  // ブロックの大きさ（1, 1/2, 1/4, 1/8。小さいほど数が増える）
     sensX:      1.5,   // 横の感度（指の移動量に対するパドルの移動量）
     sensY:      1.5,   // 縦の感度  // 振り下げながら打った時の減速（1回で最大この割合だけ遅くなる）
-    maxSpeed:   1.8,   // 最高速度（画面高さ/秒）
+    maxSpeed:   0.8,   // 最高速度（画面高さ/秒）。ハイスピード（お邪魔）を取ると最大3.0まで上がる
     paddleW:    0.6,  // パドル幅（プレイ領域の幅比）
     minVert:    0.3,   // 縦方向の最小比（横に寝すぎ防止）
     // 音
@@ -1790,6 +1790,13 @@
   if (!(CFG.cfgVer >= 6)) CFG.cfgVer = 6;
   // ブロックの初期値を1/8→1/4に変更
   if (!(CFG.cfgVer >= 7)) { if (CFG.brickScale === 0.125) CFG.brickScale = DEFAULTS.brickScale; CFG.cfgVer = 7; }
+  // 速度の初期値を 初速0.3→0.1・最高1.8→0.8・ビーム1.0→0.6 に変更（旧初期値のままなら新しい値に）
+  if (!(CFG.cfgVer >= 8)) {
+    if (CFG.speed === 0.3) CFG.speed = DEFAULTS.speed;
+    if (CFG.maxSpeed === 1.8) CFG.maxSpeed = DEFAULTS.maxSpeed;
+    if (CFG.beamSpeed === 1.0) CFG.beamSpeed = DEFAULTS.beamSpeed;
+    CFG.cfgVer = 8;
+  }
   function saveCfg() { try { localStorage.setItem(STORE_KEY, JSON.stringify(CFG)); } catch (e) {} }
 
   let W, H, dpr, top, safeBottom;
@@ -2227,6 +2234,7 @@
     eff.magnet = 0; // マグネットはミスで解除
     eff.laser = 0;  // レーザーもミスで解除
     eff.help = 0;   // ヘルプパドルも
+    eff.hs = 0;     // ハイスピードも
     ball.r = ballR();
     ball.x = Math.max(ball.r, Math.min(W - ball.r, paddle.x));
     ball.y = paddle.y - ball.r - 1;
@@ -2460,7 +2468,7 @@
     const vx = ball.vx * c - ball.vy * sn, vy = ball.vx * sn + ball.vy * c;
     if (vx * nx + vy * ny > 0) { ball.vx = vx; ball.vy = vy; }
     // 振り上げMAX扱い：最高速度まで上げ、強打と同じく時間とともに元の速さへ戻る
-    const top2 = H * CFG.maxSpeed;
+    const top2 = maxSp();
     if (top2 > s * 1.01) {
       setSpeed(top2);
       ball.extra = (ball.extra || 0) + (top2 - s);
@@ -2659,7 +2667,7 @@
     const spin0 = ball.spin;
     const hit = (ball.x - paddle.x) / (paddle.w / 2);
     const ang = Math.max(-1, Math.min(1, hit)) * 60 * Math.PI / 180;
-    const sp = Math.min(Math.max(speedOf(), H * 0.05), H * CFG.maxSpeed);
+    const sp = Math.min(Math.max(speedOf(), H * 0.05, eff.hs ? hsFloor() : 0), maxSp());
     ball.vx = Math.sin(ang) * sp;
     ball.vy = dir * Math.cos(ang) * sp;
     // 面の接線方向へのパドル速度で擦る（裏面は接線の向きが逆）
@@ -2685,7 +2693,7 @@
     if (!braked && spinAmt > 0.05 && CFG.spinAccel > 1) {
       const before = speedOf();
       const mul = 1 + (CFG.spinAccel - 1) * spinAmt; // 最大回転で spinAccel 倍
-      const after = Math.min(before * mul, H * CFG.maxSpeed);
+      const after = Math.min(before * mul, maxSp());
       if (after > before * 1.002) {
         setSpeed(after);
         const level = Math.min(1, after / (H * Math.max(CFG.maxSpeed, 0.1)));
@@ -2696,7 +2704,7 @@
     // 振り上げ（裏なら振り下ろし）強打：その打球だけ速くなり、時間とともに元に戻る
     if (CFG.vMove && drive > H * 0.2 && CFG.liftPower > 0) {
       const before = speedOf();
-      const after = Math.min(before + drive * 0.5 * CFG.liftPower, H * CFG.maxSpeed);
+      const after = Math.min(before + drive * 0.5 * CFG.liftPower, maxSp());
       if (after > before * 1.01) {
         setSpeed(after);
         ball.extra = after - before;
@@ -2706,7 +2714,7 @@
     }
     // ジャストショット
     if (isPerfect()) {
-      setSpeed(Math.min(speedOf() * 1.08, H * CFG.maxSpeed));
+      setSpeed(Math.min(speedOf() * 1.08, maxSp()));
       ball.spin = Math.max(-H * CFG.maxSpin, Math.min(H * CFG.maxSpin, ball.spin * 1.3));
       score += 100 * stage;
       addPopup(ball.x, paddle.y - 34, 'PERFECT!', '#fff27a');
@@ -2962,7 +2970,7 @@
   // バンパー：当たると加速して弾かれる（最高速度の85%まで。時間で元に戻る）
   function bumperHit(b) {
     const s = speedOf(), want = Math.max(s * 1.25, H * CFG.maxSpeed * 0.85);
-    const top2 = Math.min(H * CFG.maxSpeed, want);
+    const top2 = Math.min(maxSp(), want);
     if (top2 > s) { setSpeed(top2); ball.extra = (ball.extra || 0) + (top2 - s); }
     b.hitT = 1;
     SFX.bumper();
@@ -3174,6 +3182,7 @@
     multi2: '×2：ボールが2倍に増える', multi3: '×3：ボールが3倍に増える', multi5: '×5：ボールが5倍に増える', multi10: '×10：ボールが10倍に増える',
     magnet: 'MAG：近くのアイテムが自動で寄ってくる。二本指でタッチしている間はボールもくっつけて引き寄せる（ボールが紫になる）',
     ghost: '透明：ハズレ。しばらくパドルが見えなくなる（窓だけ見える）',
+    hispeed: 'HI-SPEED：お邪魔アイテム！取るたびにボールが速くなる（最大3.0）。威力は上がらない。次のミスまで',
     help: 'HELP：画面の一番下にヘルプパドルが出て、自分のパドルと一緒に左右に動く。WIDEで一緒に広がる。次のミスまで',
     laser: 'LASER：ボールが小さく強い光のレーザーに！曲がらずまっすぐ高速。普段は壊せない水晶ブロックも壊せる。64個まで・次のミスまで',
     gem1: '宝石（◆銅・◆銀・◆金・◆ダイヤ）：取るとスコア。ダイヤは超高得点！',
@@ -3185,7 +3194,7 @@
   let hintText = '', hintT = 0, itemTip = '', itemTipT = 0;
   const HINT_TIME = 3.2;
   // まだ説明していないアイテム（出やすい順）を最大2つ、ヒントに添える
-  const ITEM_INTRO = ['gem1', 'wide', 'power', 'barrier', 'spin', 'slow', 'multi2', 'magnet', 'laser', 'help', 'oneup', 'ghost', 'multi3', 'multi5', 'multi10'];
+  const ITEM_INTRO = ['gem1', 'wide', 'power', 'barrier', 'spin', 'slow', 'multi2', 'magnet', 'laser', 'help', 'oneup', 'ghost', 'hispeed', 'multi3', 'multi5', 'multi10'];
   let hintItems = [];
   function pickHint(key) {
     hintItems = ITEM_INTRO.filter(id => !hintSeen['item:' + id]).slice(0, 2);
@@ -3212,6 +3221,7 @@
     { id: 'multi10', label: '×10',     color: '#ff5e5e', w: 2,  mult: 10 },
     { id: 'magnet',  label: 'MAG',     color: '#b388ff', w: 10 },
     { id: 'laser',   label: 'LASER',   color: '#ff3b3b', w: 9 },
+    { id: 'hispeed', label: 'HI-SPEED', color: '#ff6d00', w: 9, text: '#ffffff' }, // お邪魔：ボールが速くなる（次のミスまで・威力は変わらない）
     { id: 'help',    label: 'HELP',    color: '#7cffcb', w: 8 },  // 画面の一番下にヘルプパドル（次のミスまで）  // ボールがレーザーに（次のミスまで）
     { id: 'ghost',   label: '透明',    color: '#3a3f55', w: 8, text: '#9aa0b8' }, // ハズレ
     // スコア用の宝石（安いほど出やすい。点数×ステージ数×倍率）
@@ -3221,9 +3231,13 @@
     { id: 'gem4',    label: '◆ダイヤ', color: '#9ff3ff', w: 8,  gem: 100000 },
   ];
   let items = [];
-  const eff = { wide: 0, wideLv: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0, laser: 0, help: 0 };
+  const eff = { wide: 0, wideLv: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0, laser: 0, help: 0, hs: 0 };
   const laserMax = () => Math.round(CFG.laserMax || 64);
   const ballCap = () => eff.laser ? laserMax() : CFG.maxBalls;
+  // 今の最高速度：ハイスピード（お邪魔）を取るたびに+0.5、最大3.0（威力は通常の最高速度のまま）
+  const HS_STEP = 0.5, HS_MAX = 3.0;
+  const maxSp = () => H * Math.min(HS_MAX, Math.max(CFG.maxSpeed, CFG.maxSpeed + HS_STEP * (eff.hs || 0)));
+  const hsFloor = () => H * (CFG.speed + HS_STEP * (eff.hs || 0));
   const ballR = () => Math.max(2, W * 0.022 * objK()) * (eff.laser ? 0.4 : 1);
   const WIDE_MULT = [1, 1.5, 2, 2.5]; // WIDEを重ねて取ると3段階まで広がる // アイテム・毒の効果時間
   function dropItem(b) {
@@ -3241,7 +3255,7 @@
     const R = H / 3, px = paddle.x, py = paddle.y + paddle.h / 2;
     // アイテム：MAG中は指の本数に関係なく自動で寄ってくる（ハズレの透明は除く）
     for (const it of items) {
-      if (it.id === 'ghost') continue;
+      if (it.id === 'ghost' || it.id === 'hispeed') continue; // お邪魔は寄せない
       const dx = px - it.x, dy = py - it.y, d = Math.hypot(dx, dy);
       if (d >= R || d < 1) continue;
       const v = H * 1.5 * (1 - d / R) * dt;
@@ -3288,6 +3302,12 @@
     if (it.id === 'barrier') eff.barrier = Math.min(99, eff.barrier + 1); // 取るたびに増える
     if (it.id === 'magnet') eff.magnet = 1;  // 次のミスまで
     if (it.id === 'help') eff.help = 1;      // 次のミスまで
+    if (it.id === 'hispeed') { // お邪魔：取るたびに速く（+0.5、最大3.0）
+      eff.hs = Math.min(Math.ceil((HS_MAX - CFG.maxSpeed) / HS_STEP), (eff.hs || 0) + 1);
+      for (const b of balls) { if (b.stuck != null || b.dead) continue; useBall(b); if (speedOf() > 0) setSpeed(Math.min(maxSp(), speedOf() + H * HS_STEP)); }
+      useBall(balls[0]);
+      SFX.beamOn();
+    }
     if (it.id === 'laser') { // レーザー：小さく・まっすぐ・高速。16個を超える分は消える
       eff.laser = 1;
       balls = balls.filter(b => !b.dead).slice(0, laserMax());
@@ -3302,7 +3322,7 @@
         if (b.stuck != null) continue;
         useBall(b);
         const s0 = speedOf();
-        if (it.id === 'spin') { b.spin = (Math.sign(b.spin) || 1) * H * CFG.maxSpin; setSpeed(Math.min(s0 * 1.15, H * CFG.maxSpeed)); }
+        if (it.id === 'spin') { b.spin = (Math.sign(b.spin) || 1) * H * CFG.maxSpin; setSpeed(Math.min(s0 * 1.15, maxSp())); }
         else setSpeed(Math.max(H * CFG.speed, s0 * 0.75));
       }
       useBall(balls[0]);
@@ -4301,6 +4321,7 @@
     if (eff.barrier > 0) chips.push([`BAR×${eff.barrier}`, 0, '#7df9ff']);
     if (eff.magnet > 0) chips.push(['MAG', 0, '#b388ff']);
     if (eff.help > 0) chips.push(['HELP', 0, '#7cffcb']);
+    if (eff.hs > 0) chips.push([`SPEED+${eff.hs}`, 0, '#ff9e40']);
     if (eff.laser > 0) chips.push(['LASER', 0, eff.magnet > 0 ? '#b388ff' : '#ff3b3b']);
     if (eff.ghost > 0) chips.push(['透明', eff.ghost, '#9aa0b8']);
     if (balls.length > 1) chips.push([`●×${balls.length}`, 0, '#ffffff']);
