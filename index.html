@@ -170,7 +170,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.16</div>
+    <div id="ver">ver 0.0.17</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -2164,7 +2164,7 @@
         const k2 = kinds[c0];
         if (k2 === 'small') continue; // 小さいブロックは下の通常処理で作る
         const hp0 = Math.max(1, hpAtDepth(depth) * k * brickK() * sizeTune().hp) * f * f;
-        const hp = Math.max(1, Math.round(hp0 * KIND_HP[k2]));
+        const hp = SOLID[k2] ? bossHpOf(stage) * 15 : Math.max(1, Math.round(hp0 * KIND_HP[k2]));
         bricks.push({ r: r0 * f, c: c0 * f, rs: f, cs: f, or: r0, type: '1', kind: k2, alive: true,
           color: KIND_COLOR[k2] || theme.blocks[colorIdx], hp, maxHp: hp, cracks: makeCracks(), hitT: 0, revived: false, reviveT: 0, lastHit: 0 });
       }
@@ -2869,10 +2869,11 @@
       return false;
     }
     if (b.kind === 'crystal' && source === 'bomb') return false;
-    if (SOLID[b.kind]) { // 壊せない
+    if (SOLID[b.kind]) { // 鉄板・バンパー：レーザーでしか削れない（ボスの15倍の硬さ）
       b.hitT = 1;
-      if (source === 'ball') { if (b.kind === 'bumper') bumperHit(b); else SFX.clank(); }
-      return false;
+      if (source === 'ball' && b.kind === 'bumper') bumperHit(b);
+      if (!(eff.laser && source === 'ball')) { if (source === 'ball' && b.kind !== 'bumper') SFX.clank(); return false; }
+      raw = Math.min(raw, Math.max(150, ballDamage())); // フィーバーでも一撃にはしない
     }
     // 回復で残りHPが小数になることがあるので、ダメージは切り上げて整数にする
     const dmg = Math.ceil(Math.min(Math.max(0, raw - (fever > 0 ? 0 : armorOf())), b.hp));
@@ -2893,7 +2894,7 @@
     }
     // 倒した
     b.alive = false;
-    aliveCount--;
+    if (countable(b)) aliveCount--; // 水晶・鉄板・バンパーはクリア条件に入っていない
     chain++;
     addCombo();
     score += Math.ceil(b.maxHp * scoreMult() * (fever > 0 ? 2 : 1));
@@ -2903,6 +2904,7 @@
     if (b.gold) goldBreak(b);
     if (b.kind === 'giant') giantBreak(b);
     if (b.kind === 'crystal') crystalBreak(b);
+    if (SOLID[b.kind]) solidBreak(b);
     if (b.kind === 'bomb') bombBlast(b);
     else if (b.kind === 'split') splitBrick(b);
     else if (b.kind === 'chest') { dropItem(b); addPopup(b.x + b.w / 2, b.y, '宝箱！', '#ffd23f'); }
@@ -2942,6 +2944,18 @@
     b.hitT = 1;
     SFX.bumper();
     score += 10;
+  }
+  // 鉄板・バンパーをレーザーで壊した：大爆発＋超高得点
+  function solidBreak(b) {
+    const bonus = Math.ceil(50000 * stage * scoreMult());
+    score += bonus;
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    for (let i = 0; i < 3; i++) explode(cx + (Math.random() - 0.5) * b.w, cy + (Math.random() - 0.5) * b.h);
+    laserSpark(cx, cy, 20);
+    addPopup(W / 2, H * 0.42, b.kind === 'bumper' ? 'バンパー破壊！！' : '鉄板破壊！！', '#ffffff', 28);
+    addPopup(W / 2, H * 0.42 + 32, `+${bonus.toLocaleString()}`, '#ffe28a', 22);
+    SFX.bomb(); SFX.jackpot();
+    hitStopCool = 0; doHitStop(0.12);
   }
   // 水晶を壊した：キラキラ砕けて大きめのスコア＋宝石
   function crystalBreak(b) {
@@ -3105,7 +3119,7 @@
     '赤い爆弾ブロックは周りを巻き込んで爆発。爆弾同士は連鎖する',
     '茶色の宝箱ブロックを壊すと、必ずアイテムが出る',
     'ピンクの丸いバンパーに当てると、ボールが一気に加速する',
-    '灰色の鉄板ブロックは壊せない。通路を通してボールを奥へ送り込め',
+    '灰色の鉄板とピンクのバンパーは普通のボールでは壊せない。LASERなら…超硬いけど削れる！',
     'ボスの弾がコックピットに当たるとしびれる。ボールで弾を消せるぞ',
     '水色に光る水晶ブロックは、普通のボールでは壊せない。LASERを取って撃ち抜け！',
     'ステージをクリアするたびに、パワーアップを1つ選べる。ゲームオーバーまで続く',
@@ -3695,6 +3709,7 @@
       ctx.fillStyle = 'rgba(255,95,210,0.25)'; ctx.beginPath(); ctx.arc(cx, cy, r * 1.25, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = b.hitT > 0 ? '#ffffff' : '#ff5fd2'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#ffd1f3'; ctx.beginPath(); ctx.arc(cx, cy, r * 0.45, 0, Math.PI * 2); ctx.fill();
+      if (ratio < 1) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, r * 1.12, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ratio); ctx.stroke(); } // 残りHPの輪
       return;
     }
     ctx.fillStyle = b.color;
@@ -3745,7 +3760,7 @@
     }
     if (ratio < 1 && !SOLID[b.kind]) { ctx.fillStyle = `rgba(0,0,0,${0.45 * (1 - ratio)})`; roundRect(x, y, w, h, 3); ctx.fill(); }
     if (b.hitT > 0) { ctx.fillStyle = `rgba(255,255,255,${0.5 * b.hitT})`; roundRect(x, y, w, h, 3); ctx.fill(); }
-    if (!SOLID[b.kind] && h > 8) { // HPバー
+    if ((!SOLID[b.kind] || ratio < 1) && h > 8) { // HPバー（鉄板は削れてから）
       const bh = Math.max(2, h * 0.08);
       ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x + 2, y + h - bh - 2, w - 4, bh);
       ctx.fillStyle = ratio > 0.5 ? '#ffffff' : ratio > 0.25 ? '#ffd166' : '#ff5d73';
