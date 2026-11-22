@@ -160,7 +160,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.02</div>
+    <div id="ver">ver 0.0.03</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -571,6 +571,7 @@
   // ---- 効果音（素材なし・Web Audioで合成） ----
   const SFX = (() => {
     let ac = null, master = null, mix = null, noise = null, verb = null, sfxSend = null, drive = null;
+    let ballBus = null, ballDrive = null; // ボールの効果音の出口（ボールが多いほど小さく）
     const lastPlay = {};
 
     // ================= 共通の部品 =================
@@ -1314,6 +1315,8 @@
       master = ac.createGain(); master.connect(mix);
       sfxSend = ac.createGain(); sfxSend.gain.value = 0.18; master.connect(sfxSend); sfxSend.connect(verb);
       drive = makeDrive(2.2); const dg = ac.createGain(); dg.gain.value = 0.7; drive.connect(dg); dg.connect(master);
+      ballBus = ac.createGain(); ballBus.connect(master);
+      ballDrive = makeDrive(2.2); const bdg = ac.createGain(); bdg.gain.value = 0.7; ballDrive.connect(bdg); bdg.connect(ballBus);
       setVolume();
       noise = ac.createBuffer(1, ac.sampleRate * 1.0, ac.sampleRate);
       const d = noise.getChannelData(0);
@@ -1371,7 +1374,7 @@
     const now = () => ac.currentTime + 0.005;
     const rallyPitch = r => 1 + Math.min(r, 16) * 0.02;
 
-    return {
+    const api = {
       init, setVolume, suspend, resume, music: Music,
       // ---- 打球：卓球の「コッ」＋芯の低音＋回転で「カッ！」「シュー！」 ----
       paddle(power, spin, rally) {
@@ -1609,6 +1612,24 @@
         [1320, 1660, 1980, 2640].forEach((f, i) => { osc('sine', f, f, t + i * 0.1, 0.2, 0.2); nz(t + i * 0.1, 0.02, 0.2, 'highpass', 5000); });
       },
     };
+    // ボールが出す音は ballBus 経由にする（呼んでいる間だけ出口を差し替え）
+    for (const k of ['paddle', 'wall', 'brickHit', 'brick', 'rallyUp', 'powerUp', 'beamOn', 'clank', 'shakeHit', 'bossHit', 'shotBreak', 'powerDown']) {
+      const fn = api[k];
+      api[k] = function () {
+        if (!ballBus) return fn.apply(this, arguments);
+        const m = master, d = drive;
+        master = ballBus; drive = ballDrive;
+        try { return fn.apply(this, arguments); } finally { master = m; drive = d; }
+      };
+    }
+    // ボールが5個を超えたら数に反比例して小さく（最低25%）
+    let ballK = 1;
+    api.ballCount = n => {
+      const k = n <= 5 ? 1 : Math.max(0.25, 5 / n);
+      if (!ballBus || Math.abs(k - ballK) < 0.01) return;
+      ballK = k; ballBus.gain.setTargetAtTime(k, ac.currentTime, 0.1);
+    };
+    return api;
   })();
 
   const STORE_KEY = 'breakout-test-cfg-v2';
@@ -2183,6 +2204,7 @@
   function update(dt) {
     updateBg(dt);
     if (state === 'title') return;
+    SFX.ballCount(balls.length);
     if (shakeT > 0) shakeT -= dt;
     if (shakeCool > 0) shakeCool -= dt;
     updateFx(dt);
