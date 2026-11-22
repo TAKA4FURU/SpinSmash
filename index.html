@@ -169,7 +169,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.08</div>
+    <div id="ver">ver 0.0.09</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -1823,7 +1823,7 @@
     paddle.w = W * CFG.paddleW * objK();
     paddle.h = Math.max(10, W * 0.035) * objK();
     paddle.baseY = H - safeBottom - paddle.h;      // 一番下（従来の位置）
-    paddle.minY = Math.min(paddle.baseY, H * 0.5); // 画面の下半分で自由に動ける
+    paddle.minY = paddleTopLimit();
     if (!CFG.vMove || paddle.y == null) paddle.y = paddle.baseY;
     paddle.y = Math.max(paddle.minY, Math.min(paddle.baseY, paddle.y));
     if (targetY == null || !CFG.vMove) targetY = paddle.y;
@@ -1905,7 +1905,15 @@
     }
     updateLowest();
     if (passed) { registerGrid(); if (state === 'play' && aliveCount <= 0 && !boss) stageClear(); }
+    // パドルはいつでも画面の上の方まで（ボス戦はボスのすぐ真下まで）
+    paddle.minY = paddleTopLimit();
+    if (paddle.y < paddle.minY) paddle.y = paddle.minY;
     if (state === 'play') paddleCrash();
+  }
+  function paddleTopLimit() {
+    const m = Math.max(8, W * 0.03);
+    const lim = boss ? boss.y + boss.h / 2 + m : top + m;
+    return Math.min(paddle.baseY, lim);
   }
   // ブロック（壊せないものも）がパドル中央の黄色いコックピットに触れたら爆発（ミス）
   function paddleCrash() {
