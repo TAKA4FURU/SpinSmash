@@ -71,6 +71,19 @@
   .tabs button { flex: 1; padding: 8px 0; border: 0; border-radius: 8px; background: #2b3560; color: #fff; font-size: 13px; }
   .tabs button.on { background: linear-gradient(90deg, #ff4d6d, #4dd8ff); font-weight: bold; }
   #rankList li .nm { width: 6.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #manualBtn { position: fixed; left: 50%; top: 66%; transform: translateX(-50%); z-index: 30; padding: 12px 26px; border-radius: 999px; border: 2px solid #ffd23f; background: rgba(20,22,45,0.9); color: #ffd23f; font: 800 16px -apple-system, "Hiragino Sans", sans-serif; touch-action: manipulation; }
+  #manualUI { position: fixed; inset: 0; z-index: 46; background: rgba(6,8,20,0.96); display: flex; flex-direction: column; }
+  #manualUI .mHead { display: flex; align-items: center; justify-content: space-between; padding: calc(env(safe-area-inset-top) + 12px) 16px 10px; border-bottom: 1px solid rgba(255,255,255,0.12); }
+  #manualUI .mHead b { color: #ffd23f; font: 900 19px -apple-system, "Hiragino Sans", sans-serif; }
+  #manualUI .mTabs { display: flex; gap: 6px; padding: 10px 12px; overflow-x: auto; flex: none; }
+  #manualUI .mTabs button { flex: none; padding: 7px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #c8d0f0; font: 700 13px -apple-system, "Hiragino Sans", sans-serif; }
+  #manualUI .mTabs button.on { background: #ffd23f; color: #1a1a2a; border-color: #ffd23f; }
+  #manualBody { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 16px 20px; color: #e8ecff; font: 14px/1.65 -apple-system, "Hiragino Sans", sans-serif; }
+  #manualBody h3 { color: #7df9ff; font-size: 15px; margin: 16px 0 6px; }
+  #manualBody .row { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.07); }
+  #manualBody .row > b { flex: none; min-width: 92px; white-space: nowrap; color: #ffd23f; }
+  #manualBody .cap { flex: none; min-width: 58px; text-align: center; padding: 1px 8px; border-radius: 999px; font: 800 11px -apple-system, sans-serif; color: #1a1a2a; margin-top: 2px; }
+  #manualClose { margin: 10px 16px calc(env(safe-area-inset-bottom) + 12px); padding: 14px; border-radius: 14px; border: none; background: #ffd23f; color: #1a1a2a; font: 900 16px -apple-system, "Hiragino Sans", sans-serif; }
   #upUI { position: fixed; inset: 0; z-index: 44; background: rgba(0,0,0,0.55); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 20px; }
   #upUI h2 { margin: 0; color: #fff27a; font: 900 22px -apple-system, "Hiragino Sans", sans-serif; letter-spacing: .06em; }
   #upUI .upNote { color: #c8d0f0; font-size: 12px; margin-bottom: 4px; }
@@ -170,7 +183,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.18</div>
+    <div id="ver">ver 0.0.19</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -202,6 +215,13 @@
       <ol id="rankList"></ol>
       <button id="rankClose">とじる</button>
     </div>
+  </div>
+  <button id="manualBtn" class="hidden">📖 遊び方</button>
+  <div id="manualUI" class="hidden">
+    <div class="mHead"><b>遊び方マニュアル</b></div>
+    <div class="mTabs" id="manualTabs"></div>
+    <div id="manualBody"></div>
+    <button id="manualClose">ヒントを閉じる</button>
   </div>
   <div id="upUI" class="hidden">
     <h2>パワーアップを選ぼう</h2>
@@ -4484,7 +4504,7 @@
 
     drawHints();
     let msg = null, sub = null;
-    if (paused)                 { msg = 'PAUSE'; sub = panelOpen ? '⚙ で閉じると再開' : '画面をタップで再開'; }
+    if (paused)                 { msg = 'PAUSE'; sub = panelOpen ? '⚙ で閉じると再開' : '画面をタップで再開（下のボタンで遊び方）'; }
     else if (state === 'ready' && !banner && hintT <= 0) { msg = 'タップで発射'; sub = '横に擦ると回転・上に振ると強打・下に振ると減速'; }
     else if (state === 'over')  { msg = 'GAME OVER'; sub = `SCORE ${score} / 最高 ${bestRally} ラリー / タップでタイトルへ`; }
     else if (state === 'allClear') { msg = 'ALL CLEAR!!'; sub = `SCORE ${score} / タップでタイトルへ`; }
@@ -4668,8 +4688,72 @@
   }
 
   const pauseBtn = document.getElementById('pauseBtn');
+  // ---- 遊び方マニュアル（ポーズ中に真ん中のボタンから） ----
+  const manualBtn = document.getElementById('manualBtn'), manualUI = document.getElementById('manualUI');
+  const manualTabs = document.getElementById('manualTabs'), manualBody = document.getElementById('manualBody');
+  const capOf = (label, color, text) => `<span class="cap" style="background:${color};color:${text || '#1a1a2a'}">${label}</span>`;
+  const row = (head, body) => `<div class="row">${head}<div>${body}</div></div>`;
+  const MANUAL = [
+    ['基本操作', () => `
+      <h3>パドルを動かす</h3>画面のどこでも指を置いて動かすと、パドルが同じように動きます。上下にも動かせます（画面のかなり上まで）。
+      <h3>ボールを打つ</h3>
+      ${row('<b>横に擦る</b>', 'ボールに回転がかかる。回転したボールはだんだん加速し、空中でカーブする')}
+      ${row('<b>上に振る</b>', '強打！ボールが一気に速くなる（時間で元に戻る）')}
+      ${row('<b>下に振る</b>', 'ボールを減速して打ち返す')}
+      ${row('<b>速いほど強い</b>', 'ボールが速いほどダメージが大きい。十分速いとビーム状態になり、ブロックを貫通する')}
+      <h3>その他の操作</h3>
+      ${row('<b>iPhoneを振る</b>', '周りの壁が揺れる。揺れた壁で跳ね返ったボールは回転MAX・速度MAX')}
+      ${row('<b>二本指</b>', 'MAGを持っている時、ボールをくっつけて引き寄せる')}
+      ${row('<b>⏪ 長押し</b>', '時間を巻き戻す。ミスしても取り返せる')}
+      ${row('<b>⏸</b>', 'ポーズ。ポーズ中は画面のどこをタップしても再開')}
+      <h3>気をつけること</h3>
+      ${row('<b>コックピット</b>', 'パドル中央の黄色い部分にブロックが当たるとクラッシュ（ミス）。ボス弾が当たるとしびれる。左右の青いレーザー部分は大丈夫')}
+      ${row('<b>ボールを落とす</b>', 'ボールが全部画面の下に落ちるとミス。ボールが複数あれば1個落ちてもミスにならない')}`],
+    ['アイテム', () => `<h3>パワーアップ</h3>` + ITEMS.filter(it => !it.gem).map(it => row(capOf(it.label, it.color, it.text), (ITEM_HINTS[it.id] || '').replace(/^[^：]*：/, ''))).join('') +
+      `<h3>スコア（宝石）</h3>` + ITEMS.filter(it => it.gem).map(it => row(capOf(it.label, it.color), `${it.gem.toLocaleString()}点 × ステージ数 × 倍率`)).join('')],
+    ['ブロック', () => `
+      ${row(capOf('普通', '#7f8cff'), '上の段ほど硬い。ヒビが入り、暗くなるほど残りHPが少ない')}
+      ${row(capOf('大きい', '#9ccc65'), '1マス丸ごとの大きなブロック。硬い')}
+      ${row(capOf('小さい', '#c5e1a5'), '小さくて当てにくいが、HPは低い')}
+      ${row(capOf('爆弾', '#ff3b3b'), '壊すと周りをまとめて吹き飛ばす。爆弾同士は連鎖')}
+      ${row(capOf('分裂', '#2fe0c0'), '壊すと小さいブロック4つに分かれる')}
+      ${row(capOf('宝箱', '#c8862b'), '少し硬いが、必ずアイテムが出る')}
+      ${row(capOf('金色', '#ffcc00'), 'JACKPOT！ボールが50個増えて大量ボーナス')}
+      ${row(capOf('水晶', '#8fe6ff'), '普通のボールでは壊せない。LASERなら壊せて高得点＋宝石')}
+      ${row(capOf('鉄板', '#9aa0b8'), 'LASERでしか削れない（ボスの15倍の硬さ）。迷路の壁にもなる')}
+      ${row(capOf('バンパー', '#ff5fd2'), '当たるとボールが加速。LASERでしか削れない')}
+      ${row(capOf('巨大岩', '#8d6e63'), 'いわステージ。ボスより硬いが、壊すと大量スコア＋アイテム3個')}
+      <h3>降りてくるブロック</h3>ブロックは上から少しずつ降りてきて、画面の下へ流れて消えます。画面に少ないと速く降ります。`],
+    ['ステージ', () => `全${STAGES}ステージ。最後に出るボスを倒すとクリア。クリアごとにパワーアップを1つ選べます（ゲームオーバーまで続く）。` +
+      Array.from({ length: STAGES }, (_, i) => { const t = themeOf(i + 1); return row(`<b style="color:${t.accent};min-width:72px">${i + 1} ${t.name}</b>`, (STAGE_HINTS[t.key] || '').replace(/^[^：]*：/, '')); }).join('')],
+    ['スコア', () => `
+      ${row('<b>ラリー</b>', 'パドルで打ち返し続けると倍率アップ（最大×4）')}
+      ${row('<b>コンボ</b>', 'ブロックを壊し続けると10コンボごとに倍率+0.5（最大×5）。4秒壊さないかミスで終了')}
+      ${row('<b>フィーバー</b>', 'ゲージが溜まると8秒間フィーバー。一撃・落ちない・スコア2倍')}
+      ${row('<b>ジャスト</b>', '止めていたパドルを当たる直前に振って打つとPERFECT')}
+      ${row('<b>ランキング</b>', '設定を変えずに遊んだ記録はオンラインランキングに送れる')}`],
+  ];
+  let manualTab = 0;
+  function renderManual() {
+    manualTabs.innerHTML = '';
+    MANUAL.forEach(([name], i) => {
+      const b = document.createElement('button'); b.textContent = name; if (i === manualTab) b.className = 'on';
+      b.addEventListener('click', () => { manualTab = i; renderManual(); manualBody.scrollTop = 0; });
+      manualTabs.appendChild(b);
+    });
+    manualBody.innerHTML = MANUAL[manualTab][1]();
+  }
+  function updateManualBtn() {
+    const show = paused && !panelOpen && manualUI.classList.contains('hidden') && (state === 'play' || state === 'ready');
+    manualBtn.classList.toggle('hidden', !show);
+  }
+  manualBtn.addEventListener('click', e => { e.stopPropagation(); renderManual(); manualUI.classList.remove('hidden'); updateManualBtn(); });
+  document.getElementById('manualClose').addEventListener('click', () => { manualUI.classList.add('hidden'); updateManualBtn(); }); // ポーズ画面に戻る
+  manualBtn.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+
   function setPaused(p) {
     paused = p;
+    setTimeout(updateManualBtn, 0);
     SFX.music.pause(p);
     pauseBtn.textContent = p ? '▶' : '⏸';
     pauseBtn.classList.toggle('on', p);
@@ -4682,6 +4766,7 @@
   let pausedByPanel = false;
   function setPanel(open) {
     panelOpen = open;
+    setTimeout(updateManualBtn, 0);
     panel.classList.toggle('open', open);
     gearBtn.classList.toggle('on', open);
     if (open && !paused) { setPaused(true); pausedByPanel = true; }
