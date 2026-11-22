@@ -1635,27 +1635,51 @@
   const beamLimit = () => balls.length > 100 ? 3 : balls.length > 30 ? 6 : 12;
   let fingerDown = false, fingers = 0, releasing = false; // fingers=ゲーム画面に触れている指の数
 
-  // ---- 背景：テーマの模様を1枚描いておき、上から下へスクロール ----
-  let bgTile = null, bgOffset = 0, bgTheme = null, streakLen = 0;
+  // ---- 背景：遠・中・近の3層に模様を描いておき、それぞれ違う速さでスクロール（遠近感）----
+  //  far : 小さく暗め・ゆっくり（土台のグラデーションもここ）
+  //  mid : 今までどおりの大きさと速さ
+  //  near: 大きく・ぼかして・数は少なめ・速く（低解像度で描いて拡大＝ボケ）
+  const BG_LAYERS = [
+    { key: 'far',  speed: 0.3, scale: 0.55, alpha: 0.5,  res: 1,    spread: 1 },
+    { key: 'mid',  speed: 1,   scale: 1,    alpha: 1,    res: 0,    spread: 1 },
+    { key: 'near', speed: 2.5, scale: 2.4,  alpha: 0.45, res: 0.22, spread: 3 },
+  ];
+  let bgTile = null, bgTheme = null, streakLen = 0;
+  const bgOffs = [0, 0, 0];
   const streaks = Array.from({ length: 16 }, () => ({ x: Math.random(), y: Math.random(), len: 0.04 + Math.random() * 0.08, sp: 1.6 + Math.random() * 1.6 }));
   function buildBg(theme) {
     bgTheme = theme;
     const th = Math.ceil(H * 3); // 速くスクロールしても繰り返しが目立たない長さ
-    const c = document.createElement('canvas');
-    c.width = Math.ceil(W * dpr); c.height = Math.ceil(th * dpr);
-    const g = c.getContext('2d');
-    g.scale(dpr, dpr);
-    const grad = g.createLinearGradient(0, 0, 0, th);
-    grad.addColorStop(0, theme.bg[0]); grad.addColorStop(0.5, theme.bg[1]); grad.addColorStop(1, theme.bg[0]);
-    g.fillStyle = grad; g.fillRect(0, 0, W, th);
-    theme.paint(g, W, th, rngOf(STAGE_ORDER.indexOf(theme.key) * 97 + 13));
-    bgTile = { c, th };
+    const seed = STAGE_ORDER.indexOf(theme.key) * 97 + 13;
+    const layers = BG_LAYERS.map((L, i) => {
+      const res = L.res || dpr;
+      const c = document.createElement('canvas');
+      c.width = Math.ceil(W * res); c.height = Math.ceil(th * res);
+      const g = c.getContext('2d');
+      g.scale(res, res);
+      if (i === 0) {
+        const grad = g.createLinearGradient(0, 0, 0, th);
+        grad.addColorStop(0, theme.bg[0]); grad.addColorStop(0.5, theme.bg[1]); grad.addColorStop(1, theme.bg[0]);
+        g.fillStyle = grad; g.fillRect(0, 0, W, th);
+      }
+      g.save();
+      g.globalAlpha = L.alpha;
+      g.scale(L.scale, L.scale);
+      // spread>1：横に広い仮の画面に描いて一部だけ見せる＝数が少なく見える（縦のループはそのまま）
+      theme.paint(g, W / L.scale * L.spread, th / L.scale, rngOf(seed + i * 7919));
+      g.restore();
+      return c;
+    });
+    bgTile = { layers, th };
   }
   function drawBg() {
     if (!bgTile) return;
-    const th = bgTile.th, y0 = bgOffset % th;
-    ctx.drawImage(bgTile.c, 0, y0 - th, W, th);
-    ctx.drawImage(bgTile.c, 0, y0, W, th);
+    const th = bgTile.th;
+    for (let i = 0; i < 3; i++) {
+      const c = bgTile.layers[i], y0 = bgOffs[i] % th;
+      ctx.drawImage(c, 0, y0 - th, W, th);
+      ctx.drawImage(c, 0, y0, W, th);
+    }
     // 高速で前進している感じの光の筋
     if (CFG.fx > 0) {
       ctx.strokeStyle = 'rgba(255,255,255,0.09)'; ctx.lineWidth = 1;
@@ -1672,7 +1696,7 @@
     const v = (state === 'play' && ball && ball.vx != null) ? speedOf() / H : 0;
     const sp = H * (0.25 + 0.35 * Math.min(1, v / Math.max(CFG.maxSpeed, 0.1))) * CFG.bgSpeed;
     const th = bgTile ? bgTile.th : H; // 背景1枚分で折り返す（どちら向きでも継ぎ目でずれない）
-    bgOffset = ((bgOffset + sp * dt) % th + th) % th;
+    for (let i = 0; i < 3; i++) bgOffs[i] = ((bgOffs[i] + sp * BG_LAYERS[i].speed * dt) % th + th) % th;
     // 光の筋：速いほど長く伸ばし、動きは抑えめにしてチラつきを防ぐ
     streakLen = Math.min(0.6, Math.abs(sp) / H * 0.12);
     const ssp = Math.sign(sp) * Math.min(Math.abs(sp), H * 3); // マイナスなら下から上へ流れる
