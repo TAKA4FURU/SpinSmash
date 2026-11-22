@@ -74,6 +74,7 @@
   #upUI { position: fixed; inset: 0; z-index: 44; background: rgba(0,0,0,0.55); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 20px; }
   #upUI h2 { margin: 0; color: #fff27a; font: 900 22px -apple-system, "Hiragino Sans", sans-serif; letter-spacing: .06em; }
   #upUI .upNote { color: #c8d0f0; font-size: 12px; margin-bottom: 4px; }
+  #upCards { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
   #upUI .upCard { width: min(84vw, 340px); padding: 14px 16px; border: 2px solid rgba(255,255,255,0.25); border-radius: 14px; background: rgba(25,30,60,0.92); color: #fff; text-align: left; font-family: -apple-system, "Hiragino Sans", sans-serif; touch-action: manipulation; }
   #upUI .upCard b { display: block; font-size: 17px; margin-bottom: 3px; }
   #upUI .upCard span { font-size: 12px; color: #b8c2ea; }
@@ -169,7 +170,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.11</div>
+    <div id="ver">ver 0.0.12</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -3042,6 +3043,7 @@
     multi2: '×2：ボールが2倍に増える', multi3: '×3：ボールが3倍に増える', multi5: '×5：ボールが5倍に増える', multi10: '×10：ボールが10倍に増える',
     magnet: 'MAG：二本指でタッチしている間、ボールをくっつけて引き寄せる（ボールが紫になる）',
     ghost: '透明：ハズレ。しばらくパドルが見えなくなる（窓だけ見える）',
+    gem1: '宝石（◆銅・◆銀・◆金・◆ダイヤ）：取るとスコア。ダイヤは超高得点！',
   };
   const HINT_KEY = 'spinsmash-hints-seen';
   let hintSeen = {};
@@ -3049,7 +3051,12 @@
   const markSeen = k => { hintSeen[k] = 1; try { localStorage.setItem(HINT_KEY, JSON.stringify(hintSeen)); } catch (e) {} };
   let hintText = '', hintT = 0, itemTip = '', itemTipT = 0;
   const HINT_TIME = 3.2;
+  // まだ説明していないアイテム（出やすい順）を最大2つ、ヒントに添える
+  const ITEM_INTRO = ['gem1', 'wide', 'power', 'barrier', 'spin', 'slow', 'multi2', 'magnet', 'oneup', 'ghost', 'multi3', 'multi5', 'multi10'];
+  let hintItems = [];
   function pickHint(key) {
+    hintItems = ITEM_INTRO.filter(id => !hintSeen['item:' + id]).slice(0, 2);
+    for (const id of hintItems) markSeen('item:' + id);
     let k = 'stage:' + key;
     if (!STAGE_HINTS[key] || hintSeen[k]) {
       const unseen = HINTS.map((_, i) => i).filter(i => !hintSeen['g' + i]);
@@ -3057,7 +3064,7 @@
       k = 'g' + i; hintText = HINTS[i];
     } else hintText = STAGE_HINTS[key];
     markSeen(k);
-    hintT = HINT_TIME;
+    hintT = HINT_TIME + hintItems.length * 1.8;
   }
   const ITEMS = [
     { id: 'wide',    label: 'WIDE',    color: '#4dd8ff', w: 22 },
@@ -3072,6 +3079,11 @@
     { id: 'multi10', label: '×10',     color: '#ff5e5e', w: 2,  mult: 10 },
     { id: 'magnet',  label: 'MAG',     color: '#b388ff', w: 10 },
     { id: 'ghost',   label: '透明',    color: '#3a3f55', w: 8, text: '#9aa0b8' }, // ハズレ
+    // スコア用の宝石（安いほど出やすい。点数×ステージ数×倍率）
+    { id: 'gem1',    label: '◆銅',     color: '#cd7f32', w: 70, gem: 1000 },
+    { id: 'gem2',    label: '◆銀',     color: '#c9d2e3', w: 45, gem: 5000 },
+    { id: 'gem3',    label: '◆金',     color: '#ffd700', w: 25, gem: 20000 },
+    { id: 'gem4',    label: '◆ダイヤ', color: '#9ff3ff', w: 8,  gem: 100000 },
   ];
   let items = [];
   const eff = { wide: 0, wideLv: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0 };
@@ -3123,7 +3135,13 @@
     if (eff.wide <= 0) eff.wideLv = 0;
   }
   function applyItem(it) {
-    if (ITEM_HINTS[it.id] && !hintSeen['item:' + it.id]) { markSeen('item:' + it.id); itemTip = ITEM_HINTS[it.id]; itemTipT = 3; }
+    if (it.gem) { // 宝石：スコアだけ
+      const v = Math.ceil(it.gem * stage * scoreMult());
+      score += v;
+      addPopup(it.x, paddle.y - 24, `+${v.toLocaleString()}`, it.color, it.gem >= 20000 ? 22 : 0);
+      if (it.gem >= 100000) { SFX.jackpot(); doHitStop(0.08); } else if (it.gem >= 20000) SFX.perfect(); else SFX.item();
+      return;
+    }
     if (it.id === 'wide') { eff.wideLv = Math.min(3, eff.wideLv + 1); eff.wide = 15; } // 取るたびに一段広がり、時間も15秒に戻る
     if (it.id === 'power') eff.power = 12;
     if (it.id === 'barrier') eff.barrier = Math.min(99, eff.barrier + 1); // 取るたびに増える
@@ -4262,7 +4280,7 @@
     if (cur) lines.push(cur);
     return lines;
   }
-  function drawHintCard(title, text, y, a, frac, col) {
+  function drawHintCard(title, text, y, a, frac, col, item) {
     ctx.save(); ctx.globalAlpha = a;
     ctx.font = '600 14px -apple-system, "Hiragino Sans", sans-serif';
     const bw = Math.min(W - 32, 360), lines = wrapText(text, bw - 28), bh = 40 + lines.length * 20;
@@ -4274,14 +4292,25 @@
     ctx.fillStyle = '#ffffff'; ctx.font = '600 14px -apple-system, "Hiragino Sans", sans-serif';
     lines.forEach((l, i) => ctx.fillText(l, x + 14, y + 30 + i * 20));
     if (frac != null) { ctx.fillStyle = col; ctx.fillRect(x + 12, y + bh - 5, (bw - 24) * frac, 2); }
+    if (item) { // アイテムの見た目（カプセル）
+      ctx.font = 'bold 10px -apple-system, sans-serif';
+      const cw = Math.max(40, ctx.measureText(item.label).width + 16);
+      ctx.fillStyle = item.color; roundRect(x + bw - cw - 12, y + 8, cw, 16, 8); ctx.fill();
+      ctx.fillStyle = item.text || '#1a1a2a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(item.label, x + bw - cw / 2 - 12, y + 16.5);
+    }
     ctx.restore();
+    return bh;
   }
   function drawHints() {
     if (state === 'ready' && hintT > 0 && !banner && !paused) {
-      drawHintCard('💡 HINT　（タップで閉じる）', hintText, H * 0.5, Math.min(1, hintT / 0.3, (HINT_TIME - hintT) / 0.2 + 0.2), hintT / HINT_TIME, '#ffd23f');
-    }
-    if (itemTipT > 0 && state === 'play') {
-      drawHintCard('NEW ITEM', itemTip, H * 0.62, Math.min(1, itemTipT / 0.4), null, '#7df9ff');
+      const full = HINT_TIME + hintItems.length * 1.8, a = Math.min(1, hintT / 0.3, (full - hintT) / 0.2 + 0.2);
+      const y1 = H * 0.42;
+      const h1 = drawHintCard('💡 HINT　（タップで閉じる）', hintText, y1, a, hintT / full, '#ffd23f');
+      let y2 = y1 + h1 + 8;
+      for (const id of hintItems) {
+        const it = ITEMS.find(x => x.id === id);
+        y2 += drawHintCard('ITEM', ITEM_HINTS[id], y2, a, null, it ? it.color : '#7df9ff', it) + 8;
+      }
     }
   }
 
