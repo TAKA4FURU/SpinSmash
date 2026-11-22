@@ -183,7 +183,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.19</div>
+    <div id="ver">ver 0.0.20</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -3172,7 +3172,7 @@
     barrier: 'BARRIER：画面の下で1回ボールを跳ね返す。重ねて取れる',
     oneup: '1UP：残機が1つ増える',
     multi2: '×2：ボールが2倍に増える', multi3: '×3：ボールが3倍に増える', multi5: '×5：ボールが5倍に増える', multi10: '×10：ボールが10倍に増える',
-    magnet: 'MAG：二本指でタッチしている間、ボールをくっつけて引き寄せる（ボールが紫になる）',
+    magnet: 'MAG：近くのアイテムが自動で寄ってくる。二本指でタッチしている間はボールもくっつけて引き寄せる（ボールが紫になる）',
     ghost: '透明：ハズレ。しばらくパドルが見えなくなる（窓だけ見える）',
     help: 'HELP：画面の一番下にヘルプパドルが出て、自分のパドルと一緒に左右に動く。WIDEで一緒に広がる。次のミスまで',
     laser: 'LASER：ボールが小さく強い光のレーザーに！曲がらずまっすぐ高速。普段は壊せない水晶ブロックも壊せる。64個まで・次のミスまで',
@@ -3237,8 +3237,18 @@
   // 近いほど強く、範囲の端ではほぼゼロ。ボールは速さを保ったまま向きだけ曲げる
   const magnetOn = () => eff.magnet > 0 && fingers >= 2 && state === 'play';
   function magnetPull(dt) {
-    if (!magnetOn()) return;
+    if (!(eff.magnet > 0 && state === 'play')) return;
     const R = H / 3, px = paddle.x, py = paddle.y + paddle.h / 2;
+    // アイテム：MAG中は指の本数に関係なく自動で寄ってくる（ハズレの透明は除く）
+    for (const it of items) {
+      if (it.id === 'ghost') continue;
+      const dx = px - it.x, dy = py - it.y, d = Math.hypot(dx, dy);
+      if (d >= R || d < 1) continue;
+      const v = H * 1.5 * (1 - d / R) * dt;
+      it.x += dx / d * Math.min(v, d); it.y += dy / d * Math.min(v, d);
+    }
+    // ボール：二本指でタッチしている間だけ
+    if (fingers < 2) return;
     for (const b of balls) {
       if (b.dead || b.stuck != null) continue;
       const dx = px - b.x, dy = py - b.y, d = Math.hypot(dx, dy);
@@ -3248,13 +3258,6 @@
       const a = H * 4 * k * dt;
       b.vx += dx / d * a; b.vy += dy / d * a;
       const s2 = Math.hypot(b.vx, b.vy); b.vx *= sp / s2; b.vy *= sp / s2;
-    }
-    for (const it of items) {
-      if (it.id === 'ghost') continue; // ハズレは引き寄せない
-      const dx = px - it.x, dy = py - it.y, d = Math.hypot(dx, dy);
-      if (d >= R || d < 1) continue;
-      const v = H * 1.5 * (1 - d / R) * dt;
-      it.x += dx / d * Math.min(v, d); it.y += dy / d * Math.min(v, d);
     }
   }
   function updateItems(dt) {
