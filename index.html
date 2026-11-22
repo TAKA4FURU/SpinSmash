@@ -169,7 +169,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.05</div>
+    <div id="ver">ver 0.0.06</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -1823,7 +1823,9 @@
     const gap = Math.max(0.5, 3 * S), side = 6;
     const bw = (W - side * 2 - gap * (cols - 1)) / cols;
     const bh = Math.max(12, H * 0.024) * S;
-    brickTop = top + 20; brickRowH = bh + gap; brickColW = bw + gap; brickSide = side;
+    brickRowH = bh + gap; brickColW = bw + gap; brickSide = side;
+    // 最初は元の1ステージ分だけ見えていて、残りは画面の上に隠れている
+    brickTop = top + 20 - (rowsInStage - stackRows0) * brickRowH + brickScroll;
     brickGrid = [];
     for (const b of bricks) {
       b.baseX = side + b.c * (bw + gap);
@@ -1841,19 +1843,62 @@
       const left = Math.min(...cs), right = colsInStage - 1 - Math.max(...cs);
       rowAmp[r] = Math.min(left, right) * (bw + gap) + side * 0.5;
     }
-    brickBottom = top + 20 + rowsInStage * (bh + gap);
+    brickBottom = top + 20 + stackRows0 * (bh + gap);
+    updateLowest();
+  }
+  function updateLowest() {
+    let lo = -1e9;
+    for (const b of bricks) if (b.alive && b.y + b.h > lo) lo = b.y + b.h;
+    lowestBrick = lo;
   }
   // 動く列の位置を更新
   let stageTime = 0;
   function moveBricks(dt) {
     stageTime += dt;
+    // 降りてくる：基本はゆっくり。画面内のブロックが少ないと速く（待ち時間を作らない）
+    if (state === 'play' && aliveCount > 0) {
+      if (scrollPause > 0) scrollPause -= dt;
+      else {
+        let vis = 0;
+        for (const b of bricks) if (b.alive && b.y + b.h > top) vis++;
+        const perScreen = bricks.length / 3;
+        const fast = vis < perScreen * 0.25 ? 5 : vis < perScreen * 0.5 ? 2 : 1;
+        brickScroll += H * 0.0045 * fast * (boss ? 0.5 : 1) * dt;
+      }
+    }
+    brickTop = top + 20 - (rowsInStage - stackRows0) * brickRowH + brickScroll;
     const sp = 0.7 + stage * 0.08;
     for (const b of bricks) {
       const a = rowAmp[b.r] || 0;
       const off = a ? Math.sin(stageTime * sp + (b.or ?? b.r) * 1.7) * a : 0;
       rowOff[b.r] = off;
       b.x = b.baseX + off;
+      b.y = brickTop + b.r * brickRowH;
     }
+    updateLowest();
+    // パドルはブロックのすぐ下まで（ブロックが降りてきたら押し下げる）
+    paddle.minY = Math.min(paddle.baseY, Math.max(brickBottom, lowestBrick) + Math.max(12, W * 0.06));
+    if (paddle.y < paddle.minY) paddle.y = paddle.minY;
+    if (state === 'play' && lowestBrick >= DANGER_Y()) bricksReachedBottom();
+  }
+  // 危険ラインに届いた：届いた段は爆発して消え、残機-1。少し押し戻して2秒止める
+  function bricksReachedBottom() {
+    const line = DANGER_Y();
+    let n = 0;
+    for (const b of bricks) {
+      if (!b.alive || b.y + b.h < line - brickRowH * 2) continue;
+      b.alive = false; b.reviveT = 0; aliveCount--; n++;
+      if (n % 4 === 0 && particles.length < 160) particles.push({ x: b.x + b.w / 2, y: b.y, vx: (Math.random() - 0.5) * H * 0.4, vy: -Math.random() * H * 0.4, life: 0.5, max: 0.5, s: 3, color: b.color });
+    }
+    brickScroll -= brickRowH * 6; scrollPause = 2;
+    lives--;
+    SFX.selfDestruct();
+    explode(W / 2, line);
+    addPopup(W / 2, line - 20, 'ブロック到達！', '#ff6b6b', 22);
+    endCombo();
+    feverGauge = 0;
+    if (lives <= 0) { state = 'over'; SFX.music.jingle('over'); eff.magnet = 0; }
+    else if (aliveCount <= 0 && !boss) stageClear();
   }
 
   // ヒビの形（ブロック内の相対座標 0〜1）。HPが減るほど本数が増える
@@ -1888,6 +1933,10 @@
     return HP_BY_ROW[i] + (HP_BY_ROW[i + 1] - HP_BY_ROW[i]) * (x - i);
   }
   let rowsInStage = ROWS, movingRows = [];
+  // ---- ブロックのスクロール：上から少しずつ降りてくる ----
+  let stackRows0 = ROWS, brickScroll = 0, scrollPause = 0;
+  const DANGER_Y = () => H * 0.75; // ここにブロックが届いたらミス
+  let lowestBrick = 0;            // いちばん下にある（生きている）ブロックの下端
   // サイズを小さくすると、配置図の1マスを f×f 個の小さなブロックに分ける
   const objK = () => CFG.objScale || 1;     // ボール・パドル
   const brickK = () => CFG.brickScale || 1; // ブロック
@@ -1898,9 +1947,11 @@
   let aliveCount = 0; // 残っているブロックの数（毎回数え直さない）
   let colsInStage = COLS, brickGrid = [], brickTop = 0, brickRowH = 1, brickColW = 1, brickSide = 6, rowOff = [];
   function makeBricks() {
-    bricks = [];
+    bricks = []; brickScroll = 0; scrollPause = 0;
     const theme = themeOf(stage), k = hpScaleOf(stage), f = subdiv();
-    const lay = LAYOUTS[theme.key];
+    // 配置図を縦に3回重ねる（ブロック量と長さが3倍。上ほど後から降りてきて硬い）
+    const base = LAYOUTS[theme.key], lay = [...base, ...base, ...base];
+    stackRows0 = base.length * f; // 最初に見えている段数（元の1ステージ分）
     rowsInStage = lay.length * f;
     colsInStage = COLS * f;
     movingRows = [];
@@ -2886,7 +2937,7 @@
 
   function spawnBoss() {
     const key = themeOf(stage).key, last = stage === STAGES;
-    const hp = Math.round((1000 + 330 * (stage - 1)) * (last ? 1.5 : 1));
+    const hp = Math.round((1000 + 330 * (stage - 1)) * (last ? 1.5 : 1) * 2); // ステージが3倍長くなったぶん2倍
     boss = { key, name: BOSSES[key].name, hp, maxHp: hp, t: 0, hitT: 0, inv: 0, fireT: 2.5, burstLeft: 0,
       w: W * (last ? 0.56 : 0.46), h: H * (last ? 0.18 : 0.15), x: W / 2, y: 0, enter: 1 };
     boss.baseY = top + 26 + boss.h / 2;
@@ -3680,8 +3731,16 @@
     drawBoss();
 
     const tiny = brickK() < 0.5;
+    // 危険ライン：ブロックが近づいた時だけ薄く出る
+    const dl = DANGER_Y(), near = 1 - (dl - lowestBrick) / (H * 0.15);
+    if (near > 0 && state === 'play') {
+      ctx.strokeStyle = `rgba(255,90,90,${0.5 * Math.min(1, near) * (0.6 + 0.4 * Math.sin(stageTime * 8))})`;
+      ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
+      ctx.beginPath(); ctx.moveTo(0, dl); ctx.lineTo(W, dl); ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.save(); ctx.beginPath(); ctx.rect(0, top, W, H - top); ctx.clip(); // ヘッダーの上には描かない
     for (const b of bricks) {
-      if (!b.alive) continue;
+      if (!b.alive || b.y + b.h < top) continue;
       const ratio = b.hp / b.maxHp;
       if (tiny) { // 小さいブロックは軽い描き方（四角＋削れ具合の暗さ＋被弾の光）
         ctx.fillStyle = b.color; ctx.fillRect(b.x, b.y, b.w, b.h);
@@ -3726,6 +3785,7 @@
       ctx.fillStyle = ratio > 0.5 ? '#ffffff' : ratio > 0.25 ? '#ffd166' : '#ff5d73';
       ctx.fillRect(b.x + 2, b.y + b.h - bh - 2, (b.w - 4) * ratio, bh);
     }
+    ctx.restore();
 
     // 破片
     for (const p of particles) {
@@ -4300,7 +4360,7 @@
     return {
       balls: packBalls(), px: paddle.x, py: paddle.y, pw: paddle.w,
       br: bricks.map(b => [b.alive, b.hp, b.reviveT, b.revived]),
-      score, lives, state, rally, chain, stageTime, windT, bossDone, combo, comboT,
+      score, lives, state, rally, chain, stageTime, windT, bossDone, combo, comboT, brickScroll, scrollPause,
       items: items.map(i => ({ ...i })), eff: { ...eff }, fever, feverGauge,
       boss: boss ? { ...boss } : null, shots: shots.map(x => ({ ...x })),
     };
@@ -4316,7 +4376,7 @@
     sn.br.forEach((v, i) => { const b = bricks[i]; if (b) [b.alive, b.hp, b.reviveT, b.revived] = v; });
     aliveCount = bricks.reduce((n, b) => n + (b.alive ? 1 : 0), 0);
     ({ score, lives, state, rally, chain, stageTime, windT, bossDone, fever, feverGauge } = sn);
-    combo = sn.combo || 0; comboT = sn.comboT || 0;
+    combo = sn.combo || 0; comboT = sn.comboT || 0; brickScroll = sn.brickScroll || 0; scrollPause = sn.scrollPause || 0;
     items = sn.items.map(i => ({ ...i }));
     Object.assign(eff, sn.eff);
     boss = sn.boss ? { ...sn.boss } : null;
