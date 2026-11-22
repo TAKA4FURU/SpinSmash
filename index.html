@@ -170,7 +170,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.13</div>
+    <div id="ver">ver 0.0.14</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -3086,7 +3086,7 @@
     { id: 'multi5',  label: '×5',      color: '#ff8c42', w: 5,  mult: 5 },
     { id: 'multi10', label: '×10',     color: '#ff5e5e', w: 2,  mult: 10 },
     { id: 'magnet',  label: 'MAG',     color: '#b388ff', w: 10 },
-    { id: 'laser',   label: 'LASER',   color: '#ff3df2', w: 9 },  // ボールがレーザーに（次のミスまで）
+    { id: 'laser',   label: 'LASER',   color: '#ff3b3b', w: 9 },  // ボールがレーザーに（次のミスまで）
     { id: 'ghost',   label: '透明',    color: '#3a3f55', w: 8, text: '#9aa0b8' }, // ハズレ
     // スコア用の宝石（安いほど出やすい。点数×ステージ数×倍率）
     { id: 'gem1',    label: '◆銅',     color: '#cd7f32', w: 70, gem: 1000 },
@@ -3716,6 +3716,8 @@
   // レーザー：長い光の軌跡＋強い光の点
   function drawLasers() {
     const L = H * 0.35, fx = Math.max(0.4, Math.min(CFG.fx, 1.5));
+    // 色：通常は赤、マグネット中は紫（ボールと同じルール）
+    const mag = eff.magnet > 0, C = mag ? '140,90,255' : '255,40,40', MID = mag ? '190,150,255' : '255,110,90', CORE = mag ? '240,230,255' : '255,235,225';
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -3733,7 +3735,7 @@
         }
         if (pts.length >= 4) {
           for (const [w, a] of [[b.r * 6, 0.12], [b.r * 3, 0.3], [b.r * 1.2, 0.85]]) {
-            ctx.strokeStyle = a > 0.5 ? `rgba(255,235,255,${a * fx * 0.9})` : `rgba(255,61,242,${a * fx})`;
+            ctx.strokeStyle = a > 0.5 ? `rgba(${CORE},${a * fx * 0.9})` : `rgba(${C},${a * fx})`;
             ctx.lineWidth = w;
             ctx.beginPath(); ctx.moveTo(pts[0], pts[1]);
             for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
@@ -3742,7 +3744,7 @@
         }
       }
       const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r * 7);
-      g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.15, 'rgba(255,120,250,0.9)'); g.addColorStop(1, 'rgba(255,61,242,0)');
+      g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.15, `rgba(${MID},0.9)`); g.addColorStop(1, `rgba(${C},0)`);
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 7, 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
@@ -4120,7 +4122,7 @@
     if (eff.poison > 0) chips.push(['毒', eff.poison, '#7cff3a']);
     if (eff.barrier > 0) chips.push([`BAR×${eff.barrier}`, 0, '#7df9ff']);
     if (eff.magnet > 0) chips.push(['MAG', 0, '#b388ff']);
-    if (eff.laser > 0) chips.push(['LASER', 0, '#ff3df2']);
+    if (eff.laser > 0) chips.push(['LASER', 0, eff.magnet > 0 ? '#b388ff' : '#ff3b3b']);
     if (eff.ghost > 0) chips.push(['透明', eff.ghost, '#9aa0b8']);
     if (balls.length > 1) chips.push([`●×${balls.length}`, 0, '#ffffff']);
     ctx.font = 'bold 10px -apple-system, sans-serif';
