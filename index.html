@@ -160,7 +160,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.01</div>
+    <div id="ver">ver 0.0.02</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -1338,6 +1338,7 @@
     }
 
     // 同じ種類の音が同時に重なりすぎないように
+    let puBusy = 0; // ギュイーンが鳴り終わる時刻
     function ok(kind, gapMs) {
       if (!ac || CFG.muted || CFG.volume <= 0) return false;
       const now = performance.now();
@@ -1417,14 +1418,20 @@
       },
       // 「ギュイーン！」：ずらした2本のノコギリ波＋共鳴フィルターが上がっていく＋ノイズの上昇
       powerUp(amount, level) {
+        // ボールが複数ある時は先頭のボールだけ鳴らす
+        if (balls.length > 1 && ball !== balls[0]) return;
+        // 前のギュイーンが鳴り終わるまで次を鳴らさない（BGMが聞こえなくなるのを防ぐ）
+        if (performance.now() < puBusy) return;
         if (!ok('powerUp', 60)) return;
         const a = Math.max(0.15, Math.min(1, amount)), t = now() + 0.02, dur = 0.28 + 0.45 * a;
+        puBusy = performance.now() + dur * 1000;
+        const bv = boss ? 0.5 : 1; // ボス戦中は小さめ
         const f0 = 130 + 420 * level, f1 = f0 * (2 + 1.2 * a);
         const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 10;
         lp.frequency.setValueAtTime(450, t); lp.frequency.exponentialRampToValueAtTime(5000 + 4000 * level, t + dur * 0.8);
         const g = ac.createGain();
-        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.14 + 0.16 * a, t + 0.05);
-        g.gain.setValueAtTime(0.14 + 0.16 * a, t + dur * 0.7); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime((0.14 + 0.16 * a) * bv, t + 0.05);
+        g.gain.setValueAtTime((0.14 + 0.16 * a) * bv, t + dur * 0.7); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
         lp.connect(g); g.connect(master);
         const lfo = ac.createOscillator(), lg = ac.createGain();
         lfo.frequency.value = 16 + 10 * a; lg.gain.value = 25; lfo.connect(lg);
@@ -1433,8 +1440,8 @@
           o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur * 0.85);
           lg.connect(o.detune); o.connect(lp); o.start(t); o.stop(t + dur + 0.03);
         }
-        osc('sine', f0 / 2, f1 / 2, t, dur, 0.12, master, 0.03);
-        nz(t, dur, 0.1 + 0.1 * a, 'bandpass', 800, 2, master, 6000, dur * 0.6);
+        osc('sine', f0 / 2, f1 / 2, t, dur, 0.12 * bv, master, 0.03);
+        nz(t, dur, (0.1 + 0.1 * a) * bv, 'bandpass', 800, 2, master, 6000, dur * 0.6);
         lfo.start(t); lfo.stop(t + dur + 0.03);
       },
       // ビームが出た：きらめき＋噴射＋重低音
