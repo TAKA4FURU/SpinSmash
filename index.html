@@ -170,7 +170,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.15</div>
+    <div id="ver">ver 0.0.16</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -554,6 +554,7 @@
     slowPower:  0.12,
     startLives: 5,     // ゲーム開始時の残機
     maxBalls:   1024,  // ボールの上限（達したら ×2〜×10 は出ない・増えない）
+    laserMax:   64,    // レーザー中のボールの上限
     itemRate:   1.4,   // 普通のブロックからアイテムが出る確率（%）。★ブロックは必ず出る
     itemBoost:  4,     // 残りブロックが減るほど確率アップ（残り0に近づくとこの倍率）
     objScale:   0.5,   // ボールとパドルの大きさ（1, 1/2, 1/4, 1/8）
@@ -587,6 +588,7 @@
     { key: 'maxSpeed',   label: '最高速度',     min: 0.6, max: 2.5, step: 0.05 },
     { key: 'beamSpeed',  label: 'ビーム発生速度', min: 0.2, max: 2.5, step: 0.05 },
     { key: 'maxBalls',   label: 'ボールの上限', min: 16, max: 1024, step: 16 },
+    { key: 'laserMax',   label: 'レーザーの上限', min: 16, max: 128, step: 8 },
     { key: 'startLives', label: '残機（次のゲームから）', min: 1, max: 99, step: 1 },
     { key: 'sensX',      label: '横の感度',     min: 0.5, max: 3, step: 0.1 },
     { key: 'sensY',      label: '縦の感度',     min: 0.5, max: 3, step: 0.1 },
@@ -1551,6 +1553,41 @@
         osc('triangle', 500, 1400, t, 0.08, 0.25);
         whoosh(t + 0.01, 1, 1.4, 0);
       },
+      // レーザー化：キュイーン！とチャージして放つ
+      laserOn() {
+        if (!ok('laserOn', 300)) return;
+        const t = now();
+        osc('sawtooth', 300, 2400, t, 0.35, 0.12); osc('square', 600, 4800, t, 0.3, 0.05);
+        osc('sine', 1200, 1200, t + 0.32, 0.5, 0.12); osc('sine', 1800, 1800, t + 0.32, 0.4, 0.06);
+        nz(t + 0.3, 0.3, 0.2, 'highpass', 5000, 0.7);
+      },
+      // レーザーの反射：ピュン！
+      laserPew() {
+        if (!ok('laserPew', 45)) return;
+        const t = now(), f = 2400 + Math.random() * 600;
+        osc('square', f, f * 0.25, t, 0.09, 0.07);
+        osc('sine', f * 1.5, f * 0.4, t, 0.07, 0.06);
+      },
+      // レーザーがブロックを焼き切る：ジュッ
+      laserCut() {
+        if (!ok('laserCut', 35)) return;
+        const t = now();
+        nz(t, 0.06, 0.18, 'bandpass', 5200 + Math.random() * 1500, 3);
+        osc('sawtooth', 1800, 900, t, 0.05, 0.05);
+      },
+      // 水晶：普通のボールだとキン（弾かれる）
+      crystalTink() {
+        if (!ok('crystalTink', 60)) return;
+        const t = now();
+        osc('sine', 3136, 3136, t, 0.25, 0.08); osc('sine', 4699, 4699, t, 0.18, 0.04);
+      },
+      // 水晶が砕ける：キラキラ
+      crystalBreak() {
+        if (!ok('crystalBreak', 80)) return;
+        const t = now();
+        [2093, 2637, 3136, 3951, 4699].forEach((f, i) => osc('sine', f, f, t + i * 0.03, 0.4, 0.07));
+        nz(t, 0.15, 0.25, 'highpass', 6000, 0.7);
+      },
       // バンパー：ポヨン！と弾む電子音
       bumper() {
         if (!ok('bumper', 50)) return;
@@ -1699,7 +1736,7 @@
       },
     };
     // ボールが出す音は ballBus 経由にする（呼んでいる間だけ出口を差し替え）
-    for (const k of ['paddle', 'wall', 'brickHit', 'brick', 'rallyUp', 'powerUp', 'beamOn', 'clank', 'shakeHit', 'bossHit', 'shotBreak', 'powerDown', 'bumper']) {
+    for (const k of ['paddle', 'wall', 'brickHit', 'brick', 'rallyUp', 'powerUp', 'beamOn', 'clank', 'shakeHit', 'bossHit', 'shotBreak', 'powerDown', 'bumper', 'laserPew', 'laserCut', 'crystalTink']) {
       const fn = api[k];
       api[k] = function () {
         if (!ballBus) return fn.apply(this, arguments);
@@ -2070,8 +2107,8 @@
   //  bomb  : 壊すと周りをまとめて吹き飛ばす（連鎖する）
   //  split : 壊すと小さいブロック4つに分かれる
   //  chest : 宝箱。少し硬いが必ずアイテムが出る
-  const KIND_HP = { big: 0.8, bomb: 0.3, split: 0.5, chest: 1.2, wall: 1, bumper: 1 };
-  const KIND_COLOR = { wall: '#6f7486', bumper: '#ff5fd2', bomb: '#ff3b3b', chest: '#c8862b', split: '#2fe0c0', giant: '#8d6e63' };
+  const KIND_HP = { big: 0.8, bomb: 0.3, split: 0.5, chest: 1.2, wall: 1, bumper: 1, crystal: 1.5 };
+  const KIND_COLOR = { crystal: '#8fe6ff', wall: '#6f7486', bumper: '#ff5fd2', bomb: '#ff3b3b', chest: '#c8862b', split: '#2fe0c0', giant: '#8d6e63' };
   const bossHpOf = n => Math.round((1000 + 330 * (n - 1)) * (n === STAGES ? 1.5 : 1) * 2);
   // いわ：ボス級の巨大岩を3個（横3マス×縦5マス、HPはボスの1.2倍）
   function placeGiants(f, lay) {
@@ -2088,13 +2125,14 @@
     }
   }
   const SOLID = { wall: 1, bumper: 1 };
-  const countable = b => !SOLID[b.kind];
+  // 水晶：レーザーでしか壊せない（普通のボールは弾かれる）。クリア条件には入らない
+  const countable = b => !SOLID[b.kind] && b.kind !== 'crystal';
   let brickTotal = 0;
   function rollKind() {
     const p = 0.08 + 0.03 * stage; // ステージ1：11%〜ステージ10：38%
     if (Math.random() >= p) return null;
     const pool = [['big', 25], ['small', 20], ['bomb', 12], ['split', 12], ['chest', 8]];
-    if (stage >= 2) pool.push(['bumper', 8]);
+    if (stage >= 2) pool.push(['bumper', 8], ['crystal', 9]);
     if (stage >= 3) pool.push(['wall', 10 + stage * 1.5]);
     let r = Math.random() * pool.reduce((a, x) => a + x[1], 0);
     for (const [k, w] of pool) { if ((r -= w) < 0) return k; }
@@ -2430,7 +2468,8 @@
     const s = speedOf();
     const dot = ball.vx * nx + ball.vy * ny;
     if (dot >= 0) return;
-    if (!sound) SFX.wall(powerOf(dot));
+    if (eff.laser) { SFX.laserPew(); laserSpark(ball.x, ball.y, 4); } // レーザーの反射：ピュン＋火花
+    else if (!sound) SFX.wall(powerOf(dot));
     ball.vx -= 2 * dot * nx;
     ball.vy -= 2 * dot * ny;
     // こおり：壁やブロックで回転が減らない（滑る）
@@ -2497,7 +2536,7 @@
     helpGlow *= Math.exp(-dt * 7);
     rallyPop *= Math.exp(-dt * 6);
     for (const p of particles) {
-      p.vy += H * 1.6 * dt;
+      p.vy += H * (p.glow ? 0.3 : 1.6) * dt;
       p.x += p.vx * dt; p.y += p.vy * dt;
       p.life -= dt;
     }
@@ -2824,6 +2863,12 @@
   function damageBrick(b, raw, source, power) {
     if (!b.alive) return false;
     if (b.kind === 'giant') raw = Math.min(raw, source === 'ball' ? Math.max(150, ballDamage()) : 60); // 爆弾やフィーバーで一撃にはしない
+    if (b.kind === 'crystal' && !eff.laser && source !== 'bomb') { // 水晶：レーザー以外は弾く
+      b.hitT = 1;
+      if (source === 'ball') { SFX.crystalTink(); if (!hintSeen['crystalTip']) { markSeen('crystalTip'); addPopup(b.x + b.w / 2, b.y + b.h + 14, 'レーザーで壊せる！', '#bff6ff'); } }
+      return false;
+    }
+    if (b.kind === 'crystal' && source === 'bomb') return false;
     if (SOLID[b.kind]) { // 壊せない
       b.hitT = 1;
       if (source === 'ball') { if (b.kind === 'bumper') bumperHit(b); else SFX.clank(); }
@@ -2841,7 +2886,8 @@
     b.hp -= dmg;
     addDamageText(b, dmg, b.hp <= 0);
     if (b.hp > 0) {
-      if (source === 'ball') SFX.brickHit(b.r, power || 0.5, 1 - b.hp / b.maxHp);
+      if (source === 'ball' && eff.laser) { SFX.laserCut(); laserSpark(ball.x, ball.y, 3); }
+      else if (source === 'ball') SFX.brickHit(b.r, power || 0.5, 1 - b.hp / b.maxHp);
       if (source === 'ball' && themeOf(stage).key === 'electric') zap(b, dmg);
       return false;
     }
@@ -2851,10 +2897,12 @@
     chain++;
     addCombo();
     score += Math.ceil(b.maxHp * scoreMult() * (fever > 0 ? 2 : 1));
-    SFX.brick(b.r, power || 0.6, chain + Math.floor(combo / 10), true); // コンボが伸びるほど音も高く
+    if (source === 'ball' && eff.laser) { SFX.laserCut(); laserSpark(b.x + b.w / 2, b.y + b.h / 2, 5); }
+    else SFX.brick(b.r, power || 0.6, chain + Math.floor(combo / 10), true); // コンボが伸びるほど音も高く
     if (source === 'ball' && speedOf() >= H * CFG.beamSpeed) doHitStop(0.04); // 高速で撃ち抜いた瞬間
     if (b.gold) goldBreak(b);
     if (b.kind === 'giant') giantBreak(b);
+    if (b.kind === 'crystal') crystalBreak(b);
     if (b.kind === 'bomb') bombBlast(b);
     else if (b.kind === 'split') splitBrick(b);
     else if (b.kind === 'chest') { dropItem(b); addPopup(b.x + b.w / 2, b.y, '宝箱！', '#ffd23f'); }
@@ -2877,6 +2925,15 @@
   }
 
   // ---- 特殊ブロックの効果 ----
+  // レーザーの火花（加算合成で光る小さな粒）
+  function laserSpark(x, y, n) {
+    if (CFG.fx <= 0) return;
+    const col = eff.magnet > 0 ? ['#d9c8ff', '#9d7bff', '#ffffff'] : ['#ffd0c0', '#ff5a3a', '#ffffff'];
+    for (let i = 0; i < n && particles.length < 180; i++) {
+      const a = Math.random() * Math.PI * 2, v = H * (0.15 + Math.random() * 0.45);
+      particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.25 + Math.random() * 0.2, max: 0.45, s: 1.5 + Math.random() * 2, color: col[i % 3], glow: true });
+    }
+  }
   // バンパー：当たると加速して弾かれる（最高速度の85%まで。時間で元に戻る）
   function bumperHit(b) {
     const s = speedOf(), want = Math.max(s * 1.25, H * CFG.maxSpeed * 0.85);
@@ -2885,6 +2942,21 @@
     b.hitT = 1;
     SFX.bumper();
     score += 10;
+  }
+  // 水晶を壊した：キラキラ砕けて大きめのスコア＋宝石
+  function crystalBreak(b) {
+    const bonus = Math.ceil(3000 * stage * scoreMult());
+    score += bonus;
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    for (let i = 0; i < 24 && particles.length < 200; i++) {
+      const a = Math.random() * Math.PI * 2, v = H * (0.1 + Math.random() * 0.4);
+      particles.push({ x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.7, max: 0.7, s: 2 + Math.random() * 3, color: ['#bff6ff', '#ffffff', '#8fd8ff', '#e3c8ff'][i % 4], glow: true });
+    }
+    const gems = ITEMS.filter(x => x.gem && x.gem >= 5000);
+    const g = gems[Math.random() < 0.15 ? gems.length - 1 : Math.random() * (gems.length - 1) | 0];
+    items.push({ ...g, x: cx, y: cy, vy: H * 0.22 });
+    addPopup(cx, b.y, `+${bonus.toLocaleString()}`, '#bff6ff', 20);
+    SFX.crystalBreak();
   }
   // 巨大岩を壊した：大爆発＋大量スコア＋アイテム3個
   function giantBreak(b) {
@@ -3035,6 +3107,7 @@
     'ピンクの丸いバンパーに当てると、ボールが一気に加速する',
     '灰色の鉄板ブロックは壊せない。通路を通してボールを奥へ送り込め',
     'ボスの弾がコックピットに当たるとしびれる。ボールで弾を消せるぞ',
+    '水色に光る水晶ブロックは、普通のボールでは壊せない。LASERを取って撃ち抜け！',
     'ステージをクリアするたびに、パワーアップを1つ選べる。ゲームオーバーまで続く',
     'ボールがたくさんある時は、1個落ちてもミスにならない',
     'ラリーを続けてゲージを溜めるとフィーバー！その間はボールが落ちない',
@@ -3065,7 +3138,7 @@
     magnet: 'MAG：二本指でタッチしている間、ボールをくっつけて引き寄せる（ボールが紫になる）',
     ghost: '透明：ハズレ。しばらくパドルが見えなくなる（窓だけ見える）',
     help: 'HELP：画面の一番下にヘルプパドルが出て、自分のパドルと一緒に左右に動く。WIDEで一緒に広がる。次のミスまで',
-    laser: 'LASER：ボールが小さく強い光のレーザーに！曲がらずまっすぐ高速で貫く。16個まで・次のミスまで',
+    laser: 'LASER：ボールが小さく強い光のレーザーに！曲がらずまっすぐ高速。普段は壊せない水晶ブロックも壊せる。64個まで・次のミスまで',
     gem1: '宝石（◆銅・◆銀・◆金・◆ダイヤ）：取るとスコア。ダイヤは超高得点！',
   };
   const HINT_KEY = 'spinsmash-hints-seen';
@@ -3112,8 +3185,8 @@
   ];
   let items = [];
   const eff = { wide: 0, wideLv: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0, laser: 0, help: 0 };
-  const LASER_MAX = 16;
-  const ballCap = () => eff.laser ? LASER_MAX : CFG.maxBalls;
+  const laserMax = () => Math.round(CFG.laserMax || 64);
+  const ballCap = () => eff.laser ? laserMax() : CFG.maxBalls;
   const ballR = () => Math.max(2, W * 0.022 * objK()) * (eff.laser ? 0.4 : 1);
   const WIDE_MULT = [1, 1.5, 2, 2.5]; // WIDEを重ねて取ると3段階まで広がる // アイテム・毒の効果時間
   function dropItem(b) {
@@ -3177,11 +3250,11 @@
     if (it.id === 'help') eff.help = 1;      // 次のミスまで
     if (it.id === 'laser') { // レーザー：小さく・まっすぐ・高速。16個を超える分は消える
       eff.laser = 1;
-      balls = balls.filter(b => !b.dead).slice(0, LASER_MAX);
+      balls = balls.filter(b => !b.dead).slice(0, laserMax());
       const lt = H * CFG.maxSpeed * 0.8;
       for (const b of balls) { b.r = ballR(); b.spin = 0; if (b.stuck == null) { useBall(b); if (speedOf() > 0) setSpeed(Math.max(speedOf(), lt)); } }
       useBall(balls[0]);
-      SFX.beamOn();
+      SFX.laserOn();
     }
     if (it.id === 'ghost') eff.ghost = 6;    // ハズレ：6秒間パドルが見えない
     if (state === 'play' && (it.id === 'spin' || it.id === 'slow')) {
@@ -3645,6 +3718,17 @@
     } else if (b.kind === 'split') { // 分裂：十字の割れ目
       ctx.strokeStyle = 'rgba(0,40,40,0.7)'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(cx, y + 1); ctx.lineTo(cx, y + h - 1); ctx.moveTo(x + 1, cy); ctx.lineTo(x + w - 1, cy); ctx.stroke();
+    } else if (b.kind === 'crystal') { // 水晶：多面体のきらめき（レーザー中は脈打つ）
+      ctx.save(); roundRect(x, y, w, h, Math.min(4, m * 0.2)); ctx.clip();
+      const g = ctx.createLinearGradient(x, y, x + w, y + h);
+      g.addColorStop(0, '#e9fdff'); g.addColorStop(0.5, '#7fdcff'); g.addColorStop(1, '#b49bff');
+      ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, y + h * 0.6); ctx.lineTo(cx - w * 0.1, y); ctx.moveTo(cx - w * 0.1, y); ctx.lineTo(x + w, y + h * 0.7); ctx.moveTo(x + w * 0.3, y + h); ctx.lineTo(cx + w * 0.15, y + h * 0.35); ctx.stroke();
+      const t = (stageTime * 0.8 + b.c * 0.13) % 1.6 - 0.3;
+      ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.moveTo(x + w * t, y); ctx.lineTo(x + w * t + w * 0.12, y); ctx.lineTo(x + w * t + w * 0.12 - h, y + h); ctx.lineTo(x + w * t - h, y + h); ctx.fill();
+      ctx.restore();
+      if (eff.laser) { ctx.strokeStyle = `rgba(255,255,255,${0.5 + 0.5 * Math.sin(stageTime * 10)})`; ctx.lineWidth = 2; roundRect(x + 1, y + 1, w - 2, h - 2, 3); ctx.stroke(); }
     } else if (b.kind === 'giant') { // 巨大岩：ゴツゴツした面と大きなヒビ
       ctx.save(); roundRect(x, y, w, h, 10); ctx.clip();
       const R = rngOf(b.r * 31 + b.c);
@@ -3730,40 +3814,54 @@
     ctx.stroke();
   }
 
-  // レーザー：長い光の軌跡＋強い光の点
+  // レーザー：長い光の軌跡＋強い光の点。全部の軌跡をまとめて3回で描き、光の玉は画像を使い回す（数が多くても軽い）
+  const laserSprites = {};
+  function laserSprite(C, MID) {
+    const key = C + MID;
+    if (laserSprites[key]) return laserSprites[key];
+    const S = 64, c = document.createElement('canvas'); c.width = c.height = S;
+    const g = c.getContext('2d'), gr = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.12, 'rgba(255,255,255,0.95)');
+    gr.addColorStop(0.25, `rgba(${MID},0.8)`); gr.addColorStop(0.6, `rgba(${C},0.25)`); gr.addColorStop(1, `rgba(${C},0)`);
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    // 十字の光芒
+    g.globalCompositeOperation = 'lighter';
+    const lg = g.createLinearGradient(0, 0, S, 0);
+    lg.addColorStop(0, `rgba(${MID},0)`); lg.addColorStop(0.5, 'rgba(255,255,255,0.7)'); lg.addColorStop(1, `rgba(${MID},0)`);
+    g.fillStyle = lg; g.fillRect(0, S / 2 - 1, S, 2);
+    g.save(); g.translate(S / 2, S / 2); g.rotate(Math.PI / 2); g.translate(-S / 2, -S / 2); g.fillRect(0, S / 2 - 1, S, 2); g.restore();
+    return (laserSprites[key] = c);
+  }
+  const laserPts = [];
   function drawLasers() {
     const L = H * 0.35, fx = Math.max(0.4, Math.min(CFG.fx, 1.5));
     // 色：通常は赤、マグネット中は紫（ボールと同じルール）
     const mag = eff.magnet > 0, C = mag ? '140,90,255' : '255,40,40', MID = mag ? '190,150,255' : '255,110,90', CORE = mag ? '240,230,255' : '255,235,225';
+    const r = ballR();
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    for (const b of balls) {
-      const t = b.trail;
-      if (t && t.length >= 4 && state === 'play') {
-        // 先頭から長さ L ぶんの点を集める
-        const pts = [b.x, b.y]; let acc = 0;
-        for (let i = t.length - 2; i >= 0; i -= 2) {
-          const px = pts[pts.length - 2], py = pts[pts.length - 1];
-          const d = Math.hypot(t[i] - px, t[i + 1] - py);
-          if (d > H * 0.3) break; // 瞬間移動（リセット）はつながない
-          acc += d; pts.push(t[i], t[i + 1]);
-          if (acc > L) break;
-        }
-        if (pts.length >= 4) {
-          for (const [w, a] of [[b.r * 6, 0.12], [b.r * 3, 0.3], [b.r * 1.2, 0.85]]) {
-            ctx.strokeStyle = a > 0.5 ? `rgba(${CORE},${a * fx * 0.9})` : `rgba(${C},${a * fx})`;
-            ctx.lineWidth = w;
-            ctx.beginPath(); ctx.moveTo(pts[0], pts[1]);
-            for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
-            ctx.stroke();
-          }
-        }
+    // 軌跡の点を集める（各ボール：先頭から長さ L まで）
+    laserPts.length = 0;
+    if (state === 'play') for (const b of balls) {
+      const t = b.trail; if (!t || t.length < 4) continue;
+      const pts = [b.x, b.y]; let acc = 0;
+      for (let i = t.length - 2; i >= 0; i -= 2) {
+        const px = pts[pts.length - 2], py = pts[pts.length - 1], d = Math.hypot(t[i] - px, t[i + 1] - py);
+        if (d > H * 0.3) break; // 瞬間移動（リセット）はつながない
+        acc += d; pts.push(t[i], t[i + 1]);
+        if (acc > L) break;
       }
-      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r * 7);
-      g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.15, `rgba(${MID},0.9)`); g.addColorStop(1, `rgba(${C},0)`);
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 7, 0, Math.PI * 2); ctx.fill();
+      if (pts.length >= 4) laserPts.push(pts);
     }
+    const strokeAll = () => { ctx.beginPath(); for (const pts of laserPts) { ctx.moveTo(pts[0], pts[1]); for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]); } ctx.stroke(); };
+    const shimmer = 0.85 + 0.15 * Math.sin(stageTime * 40); // わずかな揺らぎ
+    ctx.strokeStyle = `rgba(${C},${0.13 * fx})`; ctx.lineWidth = r * 6; strokeAll();
+    ctx.strokeStyle = `rgba(${C},${0.34 * fx * shimmer})`; ctx.lineWidth = r * 2.6; strokeAll();
+    ctx.strokeStyle = `rgba(${CORE},${0.9 * fx})`; ctx.lineWidth = r * 1.1; strokeAll();
+    // 光の玉（画像を使い回す）
+    const sp = laserSprite(C, MID), d = r * 16 * (0.9 + 0.1 * shimmer);
+    for (const b of balls) ctx.drawImage(sp, b.x - d / 2, b.y - d / 2, d, d);
     ctx.restore();
   }
   function drawTrail() {
@@ -4275,10 +4373,20 @@
 
     // 破片
     for (const p of particles) {
+      if (p.glow) continue;
       ctx.globalAlpha = Math.max(0, p.life / p.max);
       ctx.fillStyle = p.color;
       ctx.fillRect(p.x - p.s / 2, p.y - p.s / 2, p.s, p.s);
     }
+    // 光る粒（レーザーの火花・水晶のかけら）は加算合成で
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of particles) {
+      if (!p.glow) continue;
+      ctx.globalAlpha = Math.max(0, p.life / p.max);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - p.s / 2, p.y - p.s / 2, p.s, p.s);
+    }
+    ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
 
     // ダメージ数値
