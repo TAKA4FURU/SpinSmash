@@ -36,6 +36,7 @@
     background: linear-gradient(90deg, #ff4d6d, #4dd8ff); box-shadow: 0 6px 18px rgba(0,0,0,0.4);
     touch-action: manipulation;
   }
+  #ver { position: absolute; right: 12px; bottom: calc(env(safe-area-inset-bottom) + 8px); font: 600 11px -apple-system, sans-serif; color: rgba(255,255,255,0.45); letter-spacing: .05em; }
   #titleUI button.sub { background: rgba(255,255,255,0.14); font-size: 16px; padding: 12px 0; }
   #optUI { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
   .rankBox.optBox { text-align: left; }
@@ -159,6 +160,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
+    <div id="ver">ver 0.0.01</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
