@@ -170,7 +170,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.17</div>
+    <div id="ver">ver 0.0.18</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -2338,6 +2338,9 @@
     e.preventDefault();
     if (panelOpen) { setPanel(false); return; } // パネル外をタップで閉じる
     SFX.init(); // iOSは画面に触れた時に音を有効化する必要がある
+    if (paused && state !== 'title') { // ポーズ中は画面のどこをタップしても再開
+      pausedByPanel = false; setPaused(false); startDrag(e); return;
+    }
     if (paused || state === 'title' || state === 'stageClear' || state === 'upgrade') return;
     startDrag(e); // 指が増えても、今の位置から続けて動かせるよう基準を取り直す
     fingers = countFingers(e);
@@ -4481,7 +4484,7 @@
 
     drawHints();
     let msg = null, sub = null;
-    if (paused)                 { msg = 'PAUSE'; sub = panelOpen ? '⚙ で閉じると再開' : '右上の ▶ で再開'; }
+    if (paused)                 { msg = 'PAUSE'; sub = panelOpen ? '⚙ で閉じると再開' : '画面をタップで再開'; }
     else if (state === 'ready' && !banner && hintT <= 0) { msg = 'タップで発射'; sub = '横に擦ると回転・上に振ると強打・下に振ると減速'; }
     else if (state === 'over')  { msg = 'GAME OVER'; sub = `SCORE ${score} / 最高 ${bestRally} ラリー / タップでタイトルへ`; }
     else if (state === 'allClear') { msg = 'ALL CLEAR!!'; sub = `SCORE ${score} / タップでタイトルへ`; }
