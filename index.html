@@ -2033,16 +2033,22 @@
     if (shakeT <= 0 || ball.shk === shakeId) return;
     ball.shk = shakeId; // 1回の揺れで1ボール1回だけ
     const d = shakeDir, s = speedOf();
-    // 回転をかける
-    ball.spin += d * H * CFG.maxSpin * 0.35;
-    clampSpin();
+    // 回転MAX
+    ball.spin = d * H * CFG.maxSpin;
     // 向きを約20°ずらす（壁から離れる向きは保つ）
     const a = -d * 0.35 * (ny ? 1 : nx), c = Math.cos(a), sn = Math.sin(a);
     const vx = ball.vx * c - ball.vy * sn, vy = ball.vx * sn + ball.vy * c;
     if (vx * nx + vy * ny > 0) { ball.vx = vx; ball.vy = vy; }
-    setSpeed(s);
+    // 振り上げMAX扱い：最高速度まで上げ、強打と同じく時間とともに元の速さへ戻る
+    const top2 = H * CFG.maxSpeed;
+    if (top2 > s * 1.01) {
+      setSpeed(top2);
+      ball.extra = (ball.extra || 0) + (top2 - s);
+      if (s < H * CFG.beamSpeed && top2 >= H * CFG.beamSpeed) SFX.beamOn();
+    } else setSpeed(s);
     keepVertical(false);
     SFX.shakeHit();
+    SFX.powerUp(1, 1);
     if (ball === balls[0] || Math.random() < 0.1) addPopup(ball.x, ball.y + (ny ? 18 : 0), 'SHAKE!', '#7fdcff');
   }
   let motionAsked = false;
