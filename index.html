@@ -160,7 +160,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.03</div>
+    <div id="ver">ver 0.0.04</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -1901,6 +1901,7 @@
     stage = n;
     particles = []; dmgTexts = []; items = []; popups = []; zaps = []; swingHist = [];
     eff.wide = 0; eff.wideLv = 0; eff.power = 0; eff.poison = 0; eff.barrier = 0;
+    eff.ghost = 0; // 透明はステージが変わったら解除
     fever = 0; feverGauge = 0; stageTime = 0; windT = 0;
     SFX.music.setFever(false);
     boss = null; shots = []; bossDone = false; eff.stun = 0; eff.safe = 0;
@@ -1933,6 +1934,7 @@
 
   function goTitle() {
     if (!scoreSaved && score > 0) saveScore();
+    titleHi = hiScore();
     state = 'title';
     if (!paddle) { paddle = { x: W / 2, vx: 0, prevX: W / 2, vy: 0, y: null }; layoutPaddle(); targetX = paddle.x; }
     if (!ball || ball.r == null) { ball = { trail: [] }; balls = [ball]; trail = ball.trail; bricks = bricks || []; ball.r = Math.max(2, W * 0.022 * objK()); ball.x = W / 2; ball.y = H / 2; ball.vx = 0; ball.vy = 0; ball.spin = 0; ball.rot = 0; }
@@ -1944,6 +1946,9 @@
   // ---- 端末内の記録（オンラインは RANKING_URL へ送信） ----
   const SCORE_KEY = 'spinsmash-scores';
   function loadScores() { try { return JSON.parse(localStorage.getItem(SCORE_KEY) || '[]'); } catch (e) { return []; } }
+  // タイトルに出すこの端末のハイスコア（ランキング対象のプレイだけ）
+  function hiScore() { return loadScores().filter(r => r.ranked).reduce((m, r) => Math.max(m, Math.ceil(r.score) || 0), 0); }
+  let titleHi = 0;
   function saveScore() {
     scoreSaved = true;
     const list = loadScores();
@@ -2218,6 +2223,7 @@
     }
     moveBricks(dt);
     gimmicks(dt);
+    magnetPull(dt);
     updateItems(dt);
     updateFever(dt);
     updateBoss(dt);
@@ -2272,9 +2278,9 @@
       if (ball.extra) { setSpeed(Math.max(speedOf() - ball.extra, H * 0.05)); ball.extra = 0; }
       ball.stuckSpeed = Math.max(speedOf(), H * CFG.speed);
       ball.stuck = Math.max(-paddle.w / 2, Math.min(paddle.w / 2, ball.x - paddle.x));
-      ball.stuckDir = dir; // -1=表（上） 1=裏（下）
+      ball.stuckDir = -1; // 裏（下）でくっついても表（上）へ回り込ませる
       ball.vx = 0; ball.vy = 0;
-      ball.y = dir < 0 ? paddle.y - ball.r : paddle.y + paddle.h + ball.r;
+      ball.y = paddle.y - ball.r;
       SFX.magnet();
       return;
     }
@@ -2589,6 +2595,30 @@
     let r = Math.random() * pool.reduce((a, it) => a + it.w, 0), it = pool[0];
     for (const x of pool) { r -= x.w; if (r <= 0) { it = x; break; } }
     items.push({ ...it, x: b.x + b.w / 2, y: b.y + b.h / 2, vy: H * 0.22 });
+  }
+  // マグネット中に2本指で触れている間：パドルの近く（画面の高さの1/3以内）のボールと良いアイテムを引き寄せる
+  // 近いほど強く、範囲の端ではほぼゼロ。ボールは速さを保ったまま向きだけ曲げる
+  const magnetOn = () => eff.magnet > 0 && fingers >= 2 && state === 'play';
+  function magnetPull(dt) {
+    if (!magnetOn()) return;
+    const R = H / 3, px = paddle.x, py = paddle.y + paddle.h / 2;
+    for (const b of balls) {
+      if (b.dead || b.stuck != null) continue;
+      const dx = px - b.x, dy = py - b.y, d = Math.hypot(dx, dy);
+      if (d >= R || d < 1) continue;
+      const k = (1 - d / R) * (1 - d / R);
+      const sp = Math.hypot(b.vx, b.vy); if (sp < 1) continue;
+      const a = H * 4 * k * dt;
+      b.vx += dx / d * a; b.vy += dy / d * a;
+      const s2 = Math.hypot(b.vx, b.vy); b.vx *= sp / s2; b.vy *= sp / s2;
+    }
+    for (const it of items) {
+      if (it.id === 'ghost') continue; // ハズレは引き寄せない
+      const dx = px - it.x, dy = py - it.y, d = Math.hypot(dx, dy);
+      if (d >= R || d < 1) continue;
+      const v = H * 1.5 * (1 - d / R) * dt;
+      it.x += dx / d * Math.min(v, d); it.y += dy / d * Math.min(v, d);
+    }
   }
   function updateItems(dt) {
     for (const it of items) it.y += it.vy * dt;
@@ -3179,19 +3209,22 @@
     ctx.fillText('RALLY', W / 2, H * 0.5 + size * 0.6);
   }
 
+  // マグネット状態のボールは紫の濃淡2色（回転は見えたまま）
+  const ballColA = () => eff.magnet > 0 ? '#7c4dff' : BALL_COLOR_A;
+  const ballColB = () => eff.magnet > 0 ? '#d4b8ff' : BALL_COLOR_B;
   function drawBall() {
     if (eff.power > 0 || eff.poison > 0) {
       ctx.fillStyle = eff.poison > 0 ? 'rgba(124,255,58,0.35)' : 'rgba(255,77,109,0.35)';
       ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r * 1.9, 0, Math.PI * 2); ctx.fill();
     }
     const { x, y, r, rot } = ball;
-    ctx.fillStyle = BALL_COLOR_A;
+    ctx.fillStyle = ballColA();
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.arc(x, y, r, rot + Math.PI / 2, rot + Math.PI * 1.5);
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = BALL_COLOR_B;
+    ctx.fillStyle = ballColB();
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.arc(x, y, r, rot - Math.PI / 2, rot + Math.PI / 2);
@@ -3223,6 +3256,11 @@
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.font = '13px -apple-system, "Hiragino Sans", sans-serif';
     ctx.fillText('回転をかけて、加速して、撃ち抜け', cx, by + r * 3);
+    if (titleHi > 0) {
+      ctx.font = '700 15px -apple-system, "Hiragino Sans", sans-serif';
+      ctx.fillStyle = '#ffd23f';
+      ctx.fillText('HI-SCORE  ' + titleHi.toLocaleString(), cx, by + r * 3 + 30);
+    }
   }
 
   // みずの水流・ひこうの横風の目印
@@ -3561,6 +3599,15 @@
       ctx.globalAlpha = 1;
     }
 
+    // マグネットで引き寄せ中：パドルの周りに薄い紫の磁場
+    if (magnetOn()) {
+      const R = H / 3, py = paddle.y + paddle.h / 2, ph = performance.now() / 600 % 1;
+      const g = ctx.createRadialGradient(paddle.x, py, 0, paddle.x, py, R);
+      g.addColorStop(0, 'rgba(179,136,255,0.16)'); g.addColorStop(1, 'rgba(179,136,255,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(paddle.x, py, R, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = `rgba(212,184,255,${0.35 * ph})`; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(paddle.x, py, R * (1 - ph), 0, Math.PI * 2); ctx.stroke(); // 内側へ縮む輪
+    }
     drawPaddle();
 
     if (state !== 'over' && state !== 'allClear') {
@@ -3569,7 +3616,7 @@
       const n = Math.min(beamLimit(), balls.length);
       for (let i = 0; i < n; i++) { useBall(balls[i]); drawTrail(); drawBall(); }
       if (balls.length > n) {
-        for (const [col, pos] of [[BALL_COLOR_B, true], [BALL_COLOR_A, false]]) {
+        for (const [col, pos] of [[ballColB(), true], [ballColA(), false]]) {
           ctx.fillStyle = col;
           ctx.beginPath();
           for (let i = n; i < balls.length; i++) {
