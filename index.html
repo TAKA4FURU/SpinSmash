@@ -169,7 +169,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.07</div>
+    <div id="ver">ver 0.0.08</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -1823,7 +1823,7 @@
     paddle.w = W * CFG.paddleW * objK();
     paddle.h = Math.max(10, W * 0.035) * objK();
     paddle.baseY = H - safeBottom - paddle.h;      // 一番下（従来の位置）
-    paddle.minY = Math.min(paddle.baseY, brickBottom + Math.max(12, W * 0.06)); // ブロックのすぐ下
+    paddle.minY = Math.min(paddle.baseY, H * 0.5); // 画面の下半分で自由に動ける
     if (!CFG.vMove || paddle.y == null) paddle.y = paddle.baseY;
     paddle.y = Math.max(paddle.minY, Math.min(paddle.baseY, paddle.y));
     if (targetY == null || !CFG.vMove) targetY = paddle.y;
@@ -1878,15 +1878,16 @@
   let stageTime = 0;
   function moveBricks(dt) {
     stageTime += dt;
+    let passed = false;
     // 降りてくる：基本はゆっくり。画面内のブロックが少ないと速く（待ち時間を作らない）
     if (state === 'play' && aliveCount > 0) {
       if (scrollPause > 0) scrollPause -= dt;
       else {
         let vis = 0;
         for (const b of bricks) if (b.alive && countable(b) && b.y + b.h > top) vis++;
-        const perScreen = brickTotal / 3;
+        const perScreen = brickTotal / STACK;
         const fast = vis < perScreen * 0.25 ? 5 : vis < perScreen * 0.5 ? 2 : 1;
-        brickScroll += H * 0.0045 * fast * (boss ? 0.5 : 1) * dt;
+        brickScroll += H * 0.009 * fast * (boss ? 0.5 : 1) * dt;
       }
     }
     brickTop = top + 20 - (rowsInStage - stackRows0) * brickRowH + brickScroll;
@@ -1897,32 +1898,46 @@
       rowOff[b.r] = off;
       b.x = b.baseX + off;
       b.y = brickTop + b.r * brickRowH + (b.oy || 0);
-      if (b.alive && !countable(b) && b.y > H) b.alive = false; // 壊せないブロックは画面の下へ流れて消える
+      if (b.alive && b.y > H) { // 画面の下まで来たら消える（ペナルティなし・スコアもなし）
+        b.alive = false; b.reviveT = 0;
+        if (countable(b)) { aliveCount--; passed = true; }
+      }
     }
     updateLowest();
-    // パドルはブロックのすぐ下まで（ブロックが降りてきたら押し下げる）
-    paddle.minY = Math.min(paddle.baseY, Math.max(brickBottom, lowestBrick) + Math.max(12, W * 0.06));
-    if (paddle.y < paddle.minY) paddle.y = paddle.minY;
-    if (state === 'play' && lowestBrick >= DANGER_Y()) bricksReachedBottom();
+    if (passed) { registerGrid(); if (state === 'play' && aliveCount <= 0 && !boss) stageClear(); }
+    if (state === 'play') paddleCrash();
   }
-  // 危険ラインに届いた：届いた段は爆発して消え、残機-1。少し押し戻して2秒止める
-  function bricksReachedBottom() {
-    const line = DANGER_Y();
-    let n = 0;
+  // ブロック（壊せないものも）がパドル中央の黄色いコックピットに触れたら爆発（ミス）
+  function paddleCrash() {
+    if (eff.safe > 0) return;
+    const hw = paddle.w * COCKPIT / 2, x0 = paddle.x - hw, x1 = paddle.x + hw, y0 = paddle.y, y1 = paddle.y + paddle.h;
+    let hit = false;
     for (const b of bricks) {
-      if (!b.alive || !countable(b) || b.y + b.h < line - brickRowH * 2) continue;
-      b.alive = false; b.reviveT = 0; aliveCount--; n++;
-      if (n % 4 === 0 && particles.length < 160) particles.push({ x: b.x + b.w / 2, y: b.y, vx: (Math.random() - 0.5) * H * 0.4, vy: -Math.random() * H * 0.4, life: 0.5, max: 0.5, s: 3, color: b.color });
+      if (!b.alive || b.y > y1 || b.y + b.h < y0 || b.x > x1 || b.x + b.w < x0) continue;
+      if (b.kind === 'bumper') { const cx = b.x + b.w / 2, cy = b.y + b.h / 2, r = Math.min(b.w, b.h) * 0.48; const nx = Math.max(x0, Math.min(cx, x1)), ny = Math.max(y0, Math.min(cy, y1)); if ((nx - cx) ** 2 + (ny - cy) ** 2 > r * r) continue; }
+      hit = true; break;
     }
-    brickScroll -= brickRowH * 6; scrollPause = 2;
-    lives--;
+    if (!hit) return;
+    // 爆発：画面内のボールは全部なくなり、1個から。周りのブロックを消して2秒無敵＋ブロック停止
+    const R = Math.max(paddle.w * 0.9, H * 0.12), cx = paddle.x, cy = paddle.y + paddle.h / 2;
+    for (const b of bricks) {
+      if (!b.alive) continue;
+      const nx = Math.max(b.x, Math.min(cx, b.x + b.w)), ny = Math.max(b.y, Math.min(cy, b.y + b.h));
+      if ((nx - cx) ** 2 + (ny - cy) ** 2 > R * R) continue;
+      b.alive = false; b.reviveT = 0; if (countable(b)) aliveCount--;
+    }
+    registerGrid();
     SFX.selfDestruct();
-    explode(W / 2, line);
-    addPopup(W / 2, line - 20, 'ブロック到達！', '#ff6b6b', 22);
+    explode(cx, cy); explode(cx - paddle.w * 0.3, cy); explode(cx + paddle.w * 0.3, cy);
+    addPopup(cx, cy - 30, 'クラッシュ！', '#ff6b6b', 22);
+    lives--;
     endCombo();
     feverGauge = 0;
-    if (lives <= 0) { state = 'over'; SFX.music.jingle('over'); eff.magnet = 0; }
-    else if (aliveCount <= 0 && !boss) stageClear();
+    scrollPause = 2; eff.safe = 2;
+    for (const b of balls) b.dead = true;
+    if (lives <= 0) { state = 'over'; SFX.music.jingle('over'); eff.magnet = 0; return; }
+    resetBall();
+    if (aliveCount <= 0 && !boss) { state = 'play'; stageClear(); }
   }
 
   // ヒビの形（ブロック内の相対座標 0〜1）。HPが減るほど本数が増える
@@ -1959,7 +1974,7 @@
   let rowsInStage = ROWS, movingRows = [];
   // ---- ブロックのスクロール：上から少しずつ降りてくる ----
   let stackRows0 = ROWS, brickScroll = 0, scrollPause = 0;
-  const DANGER_Y = () => H * 0.75; // ここにブロックが届いたらミス
+  const STACK = 5; // 1ステージ＝配置図5回分
   let lowestBrick = 0;            // いちばん下にある（生きている）ブロックの下端
   // サイズを小さくすると、配置図の1マスを f×f 個の小さなブロックに分ける
   const objK = () => CFG.objScale || 1;     // ボール・パドル
@@ -1996,8 +2011,8 @@
   function makeBricks() {
     bricks = []; brickScroll = 0; scrollPause = 0;
     const theme = themeOf(stage), k = hpScaleOf(stage), f = subdiv();
-    // 配置図を縦に3回重ねる（ブロック量と長さが3倍。上ほど後から降りてきて硬い）
-    const base = LAYOUTS[theme.key], lay = [...base, ...base, ...base];
+    // 配置図を縦に5回重ねる（ブロック量と長さが5倍。上ほど後から降りてきて硬い）
+    const base = LAYOUTS[theme.key], lay = Array.from({ length: STACK }, () => base).flat();
     stackRows0 = base.length * f; // 最初に見えている段数（元の1ステージ分）
     rowsInStage = lay.length * f;
     colsInStage = COLS * f;
@@ -3886,13 +3901,6 @@
     drawBoss();
 
     const tiny = brickK() < 0.5;
-    // 危険ライン：ブロックが近づいた時だけ薄く出る
-    const dl = DANGER_Y(), near = 1 - (dl - lowestBrick) / (H * 0.15);
-    if (near > 0 && state === 'play') {
-      ctx.strokeStyle = `rgba(255,90,90,${0.5 * Math.min(1, near) * (0.6 + 0.4 * Math.sin(stageTime * 8))})`;
-      ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
-      ctx.beginPath(); ctx.moveTo(0, dl); ctx.lineTo(W, dl); ctx.stroke(); ctx.setLineDash([]);
-    }
     ctx.save(); ctx.beginPath(); ctx.rect(0, top, W, H - top); ctx.clip(); // ヘッダーの上には描かない
     for (const b of bricks) {
       if (!b.alive || b.y + b.h < top) continue;
