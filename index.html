@@ -170,7 +170,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.12</div>
+    <div id="ver">ver 0.0.13</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -2167,7 +2167,8 @@
     balls = [ball];
     trail = ball.trail;
     eff.magnet = 0; // マグネットはミスで解除
-    ball.r = Math.max(2, W * 0.022 * objK());
+    eff.laser = 0;  // レーザーもミスで解除
+    ball.r = ballR();
     ball.x = Math.max(ball.r, Math.min(W - ball.r, paddle.x));
     ball.y = paddle.y - ball.r - 1;
     ball.vx = 0; ball.vy = 0;
@@ -2455,7 +2456,7 @@
 
   // ビーム用の軌跡を記録（近すぎる点は間引く）
   function recordTrail() {
-    if (!ball.beam) return; // ビームを描くのは先頭12個だけ
+    if (!ball.beam && !eff.laser) return; // ビームを描くのは先頭12個だけ（レーザーは全部）
     const n = trail.length;
     if (n >= 2) {
       const dx = ball.x - trail[n - 2], dy = ball.y - trail[n - 1];
@@ -2658,10 +2659,16 @@
   }
 
   function step(dt) {
+    // レーザー：回転なし・まっすぐ・常に高速（最高速度の8割以上）
+    if (eff.laser && ball.stuck == null) {
+      ball.spin = 0;
+      const lt = H * CFG.maxSpeed * 0.8;
+      if (speedOf() < lt && speedOf() > 0) setSpeed(lt);
+    }
     // 空中のカーブ
     const s = speedOf();
     const a = CFG.curve * ball.spin * (themeOf(stage).key === 'ice' ? 1.5 : 1); // こおり：よく曲がる
-    applyCurrents(dt);
+    if (!eff.laser) applyCurrents(dt); // レーザーは水流や風でも曲がらない
     const vx0 = ball.vx, vy0 = ball.vy;
     ball.vx += (-vy0 / s) * a * dt;
     ball.vy += ( vx0 / s) * a * dt;
@@ -2786,7 +2793,7 @@
   // ---- ダメージ・ギミック ----
   // 今のボールのダメージ（POWで2倍、毒で半分）
   function ballDamage() {
-    let d = damageAt(speedOf());
+    let d = damageAt(eff.laser ? Math.max(speedOf(), H * CFG.maxSpeed) : speedOf()); // レーザーは最高速度相当
     if (eff.power > 0) d *= 2;
     if (eff.poison > 0) d *= 0.5;
     d *= 1 + 0.25 * upN('dmg');
@@ -2921,7 +2928,7 @@
   }
   // 分裂：今のボールから1個増やす
   function splitBall() {
-    if (balls.length >= CFG.maxBalls) return;
+    if (balls.length >= ballCap()) return;
     const sp = speedOf(), a = Math.atan2(ball.vy, ball.vx) + (Math.random() < 0.5 ? -0.5 : 0.5);
     balls.push({ ...ball, trail: [], vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, stuck: null });
   }
@@ -2943,7 +2950,7 @@
     const bonus = Math.ceil(5000 * stage * scoreMult());
     score += bonus;
     const cx = b.x + b.w / 2, cy = b.y + b.h / 2, sp = Math.max(speedOf(), H * CFG.speed * 1.2);
-    for (let i = 0; i < 50 && balls.length < CFG.maxBalls; i++) {
+    for (let i = 0; i < 50 && balls.length < ballCap(); i++) {
       const a = Math.PI * 2 * i / 50 + Math.random() * 0.1;
       let vx = Math.cos(a) * sp, vy = Math.sin(a) * sp;
       if (Math.abs(vy) < sp * 0.3) vy = (vy < 0 ? -1 : 1) * sp * 0.3;
@@ -3043,6 +3050,7 @@
     multi2: '×2：ボールが2倍に増える', multi3: '×3：ボールが3倍に増える', multi5: '×5：ボールが5倍に増える', multi10: '×10：ボールが10倍に増える',
     magnet: 'MAG：二本指でタッチしている間、ボールをくっつけて引き寄せる（ボールが紫になる）',
     ghost: '透明：ハズレ。しばらくパドルが見えなくなる（窓だけ見える）',
+    laser: 'LASER：ボールが小さく強い光のレーザーに！曲がらずまっすぐ高速で貫く。16個まで・次のミスまで',
     gem1: '宝石（◆銅・◆銀・◆金・◆ダイヤ）：取るとスコア。ダイヤは超高得点！',
   };
   const HINT_KEY = 'spinsmash-hints-seen';
@@ -3052,7 +3060,7 @@
   let hintText = '', hintT = 0, itemTip = '', itemTipT = 0;
   const HINT_TIME = 3.2;
   // まだ説明していないアイテム（出やすい順）を最大2つ、ヒントに添える
-  const ITEM_INTRO = ['gem1', 'wide', 'power', 'barrier', 'spin', 'slow', 'multi2', 'magnet', 'oneup', 'ghost', 'multi3', 'multi5', 'multi10'];
+  const ITEM_INTRO = ['gem1', 'wide', 'power', 'barrier', 'spin', 'slow', 'multi2', 'magnet', 'laser', 'oneup', 'ghost', 'multi3', 'multi5', 'multi10'];
   let hintItems = [];
   function pickHint(key) {
     hintItems = ITEM_INTRO.filter(id => !hintSeen['item:' + id]).slice(0, 2);
@@ -3078,6 +3086,7 @@
     { id: 'multi5',  label: '×5',      color: '#ff8c42', w: 5,  mult: 5 },
     { id: 'multi10', label: '×10',     color: '#ff5e5e', w: 2,  mult: 10 },
     { id: 'magnet',  label: 'MAG',     color: '#b388ff', w: 10 },
+    { id: 'laser',   label: 'LASER',   color: '#ff3df2', w: 9 },  // ボールがレーザーに（次のミスまで）
     { id: 'ghost',   label: '透明',    color: '#3a3f55', w: 8, text: '#9aa0b8' }, // ハズレ
     // スコア用の宝石（安いほど出やすい。点数×ステージ数×倍率）
     { id: 'gem1',    label: '◆銅',     color: '#cd7f32', w: 70, gem: 1000 },
@@ -3086,11 +3095,14 @@
     { id: 'gem4',    label: '◆ダイヤ', color: '#9ff3ff', w: 8,  gem: 100000 },
   ];
   let items = [];
-  const eff = { wide: 0, wideLv: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0 };
+  const eff = { wide: 0, wideLv: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0, laser: 0 };
+  const LASER_MAX = 16;
+  const ballCap = () => eff.laser ? LASER_MAX : CFG.maxBalls;
+  const ballR = () => Math.max(2, W * 0.022 * objK()) * (eff.laser ? 0.4 : 1);
   const WIDE_MULT = [1, 1.5, 2, 2.5]; // WIDEを重ねて取ると3段階まで広がる // アイテム・毒の効果時間
   function dropItem(b) {
     // ボールが上限なら、増えるアイテムは出さない
-    const pool = balls.length >= CFG.maxBalls ? ITEMS.filter(x => !x.mult) : ITEMS;
+    const pool = balls.length >= ballCap() ? ITEMS.filter(x => !x.mult) : ITEMS;
     let r = Math.random() * pool.reduce((a, it) => a + it.w, 0), it = pool[0];
     for (const x of pool) { r -= x.w; if (r <= 0) { it = x; break; } }
     items.push({ ...it, x: b.x + b.w / 2, y: b.y + b.h / 2, vy: H * 0.22 });
@@ -3146,6 +3158,14 @@
     if (it.id === 'power') eff.power = 12;
     if (it.id === 'barrier') eff.barrier = Math.min(99, eff.barrier + 1); // 取るたびに増える
     if (it.id === 'magnet') eff.magnet = 1;  // 次のミスまで
+    if (it.id === 'laser') { // レーザー：小さく・まっすぐ・高速。16個を超える分は消える
+      eff.laser = 1;
+      balls = balls.filter(b => !b.dead).slice(0, LASER_MAX);
+      const lt = H * CFG.maxSpeed * 0.8;
+      for (const b of balls) { b.r = ballR(); b.spin = 0; if (b.stuck == null) { useBall(b); if (speedOf() > 0) setSpeed(Math.max(speedOf(), lt)); } }
+      useBall(balls[0]);
+      SFX.beamOn();
+    }
     if (it.id === 'ghost') eff.ghost = 6;    // ハズレ：6秒間パドルが見えない
     if (state === 'play' && (it.id === 'spin' || it.id === 'slow')) {
       for (const b of balls) {
@@ -3174,7 +3194,7 @@
       if (b.dead) continue;
       const sp = Math.hypot(b.vx, b.vy), ang = Math.atan2(b.vy, b.vx);
       for (let i = 1; i < k; i++) {
-        if (balls.length + add.length >= CFG.maxBalls) break; // 上限を超えては増えない
+        if (balls.length + add.length >= ballCap()) break; // 上限を超えては増えない（レーザー中は16個）
         const nb = { ...b, trail: [] };
         if (b.stuck != null) { nb.stuck = Math.max(-paddle.w / 2, Math.min(paddle.w / 2, b.stuck + (Math.random() - 0.5) * paddle.w * 0.6)); }
         else {
@@ -3693,6 +3713,40 @@
     ctx.stroke();
   }
 
+  // レーザー：長い光の軌跡＋強い光の点
+  function drawLasers() {
+    const L = H * 0.35, fx = Math.max(0.4, Math.min(CFG.fx, 1.5));
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const b of balls) {
+      const t = b.trail;
+      if (t && t.length >= 4 && state === 'play') {
+        // 先頭から長さ L ぶんの点を集める
+        const pts = [b.x, b.y]; let acc = 0;
+        for (let i = t.length - 2; i >= 0; i -= 2) {
+          const px = pts[pts.length - 2], py = pts[pts.length - 1];
+          const d = Math.hypot(t[i] - px, t[i + 1] - py);
+          if (d > H * 0.3) break; // 瞬間移動（リセット）はつながない
+          acc += d; pts.push(t[i], t[i + 1]);
+          if (acc > L) break;
+        }
+        if (pts.length >= 4) {
+          for (const [w, a] of [[b.r * 6, 0.12], [b.r * 3, 0.3], [b.r * 1.2, 0.85]]) {
+            ctx.strokeStyle = a > 0.5 ? `rgba(255,235,255,${a * fx * 0.9})` : `rgba(255,61,242,${a * fx})`;
+            ctx.lineWidth = w;
+            ctx.beginPath(); ctx.moveTo(pts[0], pts[1]);
+            for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
+            ctx.stroke();
+          }
+        }
+      }
+      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r * 7);
+      g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.15, 'rgba(255,120,250,0.9)'); g.addColorStop(1, 'rgba(255,61,242,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 7, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
   function drawTrail() {
     if (CFG.fx <= 0 || trail.length < 2 || state !== 'play') return;
     const fx = Math.min(CFG.fx, 2);
@@ -4066,6 +4120,7 @@
     if (eff.poison > 0) chips.push(['毒', eff.poison, '#7cff3a']);
     if (eff.barrier > 0) chips.push([`BAR×${eff.barrier}`, 0, '#7df9ff']);
     if (eff.magnet > 0) chips.push(['MAG', 0, '#b388ff']);
+    if (eff.laser > 0) chips.push(['LASER', 0, '#ff3df2']);
     if (eff.ghost > 0) chips.push(['透明', eff.ghost, '#9aa0b8']);
     if (balls.length > 1) chips.push([`●×${balls.length}`, 0, '#ffffff']);
     ctx.font = 'bold 10px -apple-system, sans-serif';
@@ -4231,8 +4286,9 @@
     if (state !== 'over' && state !== 'allClear') {
       // ボールが多い時はビームを先頭12個まで（重くならないように）
       // 先頭12個はビーム付きの2色ボール、それ以降は回転の向きで色分けした単色の丸をまとめて描く
-      const n = Math.min(beamLimit(), balls.length);
-      for (let i = 0; i < n; i++) { useBall(balls[i]); drawTrail(); drawBall(); }
+      const n = eff.laser ? balls.length : Math.min(beamLimit(), balls.length);
+      if (eff.laser) drawLasers();
+      else for (let i = 0; i < n; i++) { useBall(balls[i]); drawTrail(); drawBall(); }
       if (balls.length > n) {
         for (const [col, pos] of [[ballColB(), true], [ballColA(), false]]) {
           ctx.fillStyle = col;
