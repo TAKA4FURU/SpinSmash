@@ -183,7 +183,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.22</div>
+    <div id="ver">ver 0.0.23</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -546,7 +546,33 @@
   // ステージ順（おまかせ）：だんだん手強い印象の属性へ
   const STAGE_ORDER = ['space', 'grass', 'water', 'fire', 'electric', 'sky', 'rock', 'ice', 'poison', 'steel', 'bio'];
   const songOf = n => 's' + STAGE_ORDER.indexOf(themeOf(n).key); // うちゅう=s0、くさ=s1 …
-  const themeOf = n => THEMES.find(t => t.key === STAGE_ORDER[(n - 1) % STAGES]);
+  // ---- 周回：ステージ11の次は12（＝2周目のステージ1・色違い）。周ごとにブロックが硬く・速くなる ----
+  const loopOf = n => Math.floor((n - 1) / STAGES);       // 0＝1周目
+  const baseStage = n => (n - 1) % STAGES + 1;             // 1〜11
+  const loopHp = n => Math.pow(2, loopOf(n));               // HP：1周ごとに×2
+  const loopSpeed = n => Math.min(3, Math.pow(1.3, loopOf(n))); // 降下速度：×1.3ずつ（最大3倍）
+  const isLastOfLoop = n => baseStage(n) === STAGES;
+  function hueShift(hex, deg) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex); if (!m) return hex;
+    const v = parseInt(m[1], 16); let r = (v >> 16) / 255, g = (v >> 8 & 255) / 255, b = (v & 255) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+    let h = 0, sat = 0;
+    if (d) { sat = d / (1 - Math.abs(2 * l - 1)); h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h *= 60; }
+    h = ((h + deg) % 360 + 360) % 360;
+    const c = (1 - Math.abs(2 * l - 1)) * sat, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m2 = l - c / 2;
+    const [r1, g1, b1] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+    const to = u => Math.round((u + m2) * 255).toString(16).padStart(2, '0');
+    return '#' + to(r1) + to(g1) + to(b1);
+  }
+  const themeCache = {};
+  const themeOf = n => {
+    const base = THEMES.find(t => t.key === STAGE_ORDER[(n - 1) % STAGES]), lp = loopOf(n);
+    if (!lp) return base;
+    const key = base.key + ':' + lp;
+    if (themeCache[key]) return themeCache[key];
+    const deg = (lp * 137) % 360; // 周ごとに色相をずらす（色違い）
+    return (themeCache[key] = { ...base, loopHue: deg, bg: base.bg.map(c => hueShift(c, deg)), accent: hueShift(base.accent, deg), blocks: base.blocks.map(c => hueShift(c, deg)) });
+  };
 
   // ---- 調整できる値（初期値） ----
   const DEFAULTS = {
@@ -1876,6 +1902,11 @@
       // spread>1：横に広い仮の画面に描いて一部だけ見せる＝数が少なく見える（縦のループはそのまま）
       theme.paint(g, W / L.scale * L.spread, th / L.scale, rngOf(seed + i * 7919));
       g.restore();
+      if (theme.loopHue) { // 2周目以降：背景の色相を寄せて色違いに
+        // 不透明な一番奥は「色相」で、透明な手前の層は描いた物の上だけを色付け（透明部分は塗らない）
+        g.save(); g.globalCompositeOperation = i === 0 ? 'hue' : 'source-atop'; g.globalAlpha = i === 0 ? 0.75 : 0.45;
+        g.fillStyle = theme.accent; g.fillRect(0, 0, W, th); g.restore();
+      }
       return c;
     });
     bgTile = { layers, th };
@@ -1993,7 +2024,7 @@
         for (const b of bricks) if (b.alive && countable(b) && b.y + b.h > top) vis++;
         const perScreen = brickTotal / STACK;
         const fast = vis < perScreen * 0.25 ? 5 : vis < perScreen * 0.5 ? 2 : 1;
-        brickScroll += H * 0.009 * fast * (boss ? 0.5 : 1) * dt;
+        brickScroll += H * 0.009 * fast * loopSpeed(stage) * (boss ? 0.5 : 1) * dt;
       }
     }
     brickTop = top + 20 - (rowsInStage - stackRows0) * brickRowH + brickScroll;
@@ -2079,7 +2110,7 @@
   }
 
   // ステージが進むほどブロックが硬くなる（第10ステージで約2倍）
-  const hpScaleOf = n => n <= 1 ? 0.75 : 1 + 0.1 * (n - 2); // うちゅう（練習）は柔らかめ
+  const hpScaleOf = n => (baseStage(n) <= 1 ? (loopOf(n) ? 1 : 0.75) : 1 + 0.1 * (baseStage(n) - 2)) * loopHp(n); // うちゅう（練習）は柔らかめ。周回で×2ずつ
   // 段の深さ（0=一番奥 1=一番手前）からHPを決める（6段のときの HP_BY_ROW と同じ）
   function hpAtDepth(f) {
     const x = f * (HP_BY_ROW.length - 1), i = Math.min(Math.floor(x), HP_BY_ROW.length - 2);
@@ -2136,7 +2167,7 @@
   //  chest : 宝箱。少し硬いが必ずアイテムが出る
   const KIND_HP = { big: 0.8, bomb: 0.3, split: 0.5, chest: 1.2, wall: 1, bumper: 1, crystal: 1.5 };
   const KIND_COLOR = { crystal: '#8fe6ff', wall: '#6f7486', bumper: '#ff5fd2', bomb: '#ff3b3b', chest: '#c8862b', split: '#2fe0c0', giant: '#8d6e63' };
-  const bossHpOf = n => Math.round((1000 + 330 * (n - 1)) * (n === STAGES ? 1.5 : 1) * 2);
+  const bossHpOf = n => Math.round((1000 + 330 * (baseStage(n) - 1)) * (isLastOfLoop(n) ? 1.5 : 1) * 2 * loopHp(n));
   // いわ：ボス級の巨大岩を3個（横3マス×縦5マス、HPはボスの1.2倍）
   function placeGiants(f, lay) {
     const segRows = LAYOUTS.rock.length, per = Math.floor(lay.length / segRows);
@@ -2280,7 +2311,7 @@
     buildBg(themeOf(n));
     SFX.music.play(songOf(n));
     const t = themeOf(n);
-    banner = { text: `STAGE ${n}`, sub: t.name, color: t.accent, life: 2.2 };
+    banner = { text: `STAGE ${n}`, sub: loopOf(n) ? `${loopOf(n) + 1}周目` : '', color: t.accent, life: 2.2 };
   }
 
   // ランキングに送れるのは、遊びに関わる設定が初期値のままのプレイだけ（巻き戻しはOK）
@@ -2591,8 +2622,7 @@
     if (state === 'stageClear') {
       stageTimer -= dt;
       if (stageTimer <= 0) {
-        if (stage >= STAGES) { state = 'allClear'; saveScore(); SFX.music.jingle('allclear'); }
-        else openUpgrade();
+        openUpgrade(); // 終わりなき戦い：ステージ11の次は2周目のステージ12へ
       }
       return;
     }
@@ -3152,6 +3182,8 @@
     'ピンクの丸いバンパーに当てると、ボールが一気に加速する',
     '灰色の鉄板とピンクのバンパーは普通のボールでは壊せない。LASERなら…超硬いけど削れる！',
     'ボスの弾がコックピットに当たるとしびれる。ボールで弾を消せるぞ',
+    'ボスはボールが多いほどHPが増える。少ないボールで倒すと撃破ボーナスが最大10倍！',
+    'ステージ11の次は2周目。周を重ねるほどブロックが硬く速くなる。どこまで行けるか？',
     '水色に光る水晶ブロックは、普通のボールでは壊せない。LASERを取って撃ち抜け！',
     'ステージをクリアするたびに、パワーアップを1つ選べる。ゲームオーバーまで続く',
     'ボールがたくさんある時は、1個落ちてもミスにならない',
@@ -3204,7 +3236,7 @@
       const unseen = HINTS.map((_, i) => i).filter(i => !hintSeen['g' + i]);
       const i = unseen.length ? unseen[0] : Math.random() * HINTS.length | 0;
       k = 'g' + i; hintText = HINTS[i];
-    } else hintText = STAGE_HINTS[key];
+    } else hintText = STAGE_HINTS[key].replace(/^[^：]*：/, '');
     markSeen(k);
     hintT = HINT_TIME + hintItems.length * 1.8;
   }
@@ -3429,10 +3461,15 @@
   };
   let boss = null, shots = [], bossDone = false;
 
+  // ボールの数でボスの最大HPが変わる：1個＝1/3、10個＝等倍、100個＝約3倍（最大10倍）
+  const liveBalls = () => { let n = 0; for (const b of balls) if (!b.dead) n++; return Math.max(1, n); };
+  const bossBallK = () => Math.min(10, Math.pow(liveBalls(), Math.log10(3)) / 3);
+  // 撃破ボーナスの倍率：倒した時のボールが少ないほど高い
+  const bossBonusMult = n => n <= 1 ? 10 : n <= 3 ? 5 : n <= 9 ? 2 : 1;
   function spawnBoss() {
-    const key = themeOf(stage).key, last = stage === STAGES;
-    const hp = bossHpOf(stage); // ステージが長くなったぶん2倍
-    boss = { key, name: BOSSES[key].name, hp, maxHp: hp, t: 0, hitT: 0, inv: 0, fireT: 2.5, burstLeft: 0,
+    const key = themeOf(stage).key, last = isLastOfLoop(stage);
+    const baseHp = bossHpOf(stage), hp = Math.round(baseHp * bossBallK());
+    boss = { key, name: BOSSES[key].name, hp, maxHp: hp, baseHp, ballK: bossBallK(), t: 0, hitT: 0, inv: 0, fireT: 2.5, burstLeft: 0,
       w: W * (last ? 0.56 : 0.46), h: H * (last ? 0.18 : 0.15), x: W / 2, y: 0, enter: 1 };
     boss.baseY = top + 26 + boss.h / 2;
     boss.y = -boss.h;
@@ -3440,7 +3477,7 @@
     banner = { text: 'WARNING', sub: boss.name, color: '#ff4d4d', life: 2.2 };
     SFX.bossAppear();
     SFX.music.stop();
-    setTimeout(() => { if (boss) SFX.music.play(stage === STAGES ? 'last' : 'boss'); }, 1300); // 警報のあとボス曲
+    setTimeout(() => { if (boss) SFX.music.play(isLastOfLoop(stage) ? 'last' : 'boss'); }, 1300); // 警報のあとボス曲
   }
 
   function updateBoss(dt) {
@@ -3450,6 +3487,11 @@
     b.hitT = Math.max(0, b.hitT - dt * 5);
     b.inv = Math.max(0, b.inv - dt);
     // 秒間ダメージ上限：1秒あたり 最大HP÷最短秒数 だけ「受けられる量」がたまる（最大1秒分）
+    // ボールの数に合わせて最大HPを伸び縮み（残りHPの割合はそのまま。ゆっくり追従）
+    const wantK = bossBallK();
+    b.ballK += (wantK - b.ballK) * Math.min(1, dt * 3);
+    const newMax = Math.max(1, Math.round(b.baseHp * b.ballK));
+    if (newMax !== b.maxHp) { b.hp = Math.max(1, Math.round(b.hp / b.maxHp * newMax)); b.maxHp = newMax; }
     if (b.enter <= 0) { const cap = b.maxHp / Math.max(1, CFG.bossMinSec); b.budget = Math.min(cap, (b.budget || 0) + cap * dt); }
     b.maxT = Math.max(0, (b.maxT || 0) - dt);
     if (b.enter > 0) { // 上から降りてくる
@@ -3473,7 +3515,7 @@
   const nextFire = angry => Math.max(1.2, 2.8 - stage * 0.12) * (angry ? 0.65 : 1) * CFG.shotInterval * (0.8 + Math.random() * 0.4);
 
   function fireShots(cfg, angry) {
-    const b = boss, n = cfg.n + Math.round(CFG.shotExtra) + (angry ? 1 : 0) + (stage === STAGES ? 1 : 0);
+    const b = boss, n = cfg.n + Math.round(CFG.shotExtra) + (angry ? 1 : 0) + (isLastOfLoop(stage) ? 1 : 0);
     const ox = b.x, oy = b.y + b.h * 0.4;
     let base = Math.PI / 2;
     if (cfg.aim) base = Math.atan2(paddle.y - oy, paddle.x - ox);
@@ -3582,8 +3624,12 @@
     aliveCount = 0;
     if (n) { SFX.burn(); addPopup(W / 2, brickBottom + 20, `残り${n}個 爆破！`, '#ff9f1a'); }
     for (let i = 0; i < 4; i++) explode(b.x + (Math.random() - 0.5) * b.w, b.y + (Math.random() - 0.5) * b.h + H * 0.05);
-    score += 3000 * stage;
-    addPopup(b.x, b.y, `+${3000 * stage}`, '#fff27a');
+    // 撃破ボーナス：ボールが少ないほど高い（1個＝×10、2〜3個＝×5、4〜9個＝×2）
+    const nb = liveBalls(), bm = bossBonusMult(nb), bonus = Math.ceil(50000 * stage * bm * scoreMult());
+    score += bonus;
+    addPopup(W / 2, H * 0.36, `BOSS BONUS ×${bm}`, bm >= 5 ? '#ffd700' : '#fff27a', bm >= 5 ? 30 : 22);
+    addPopup(W / 2, H * 0.36 + 34, `+${bonus.toLocaleString()}（ボール${nb}個）`, '#fff6b0', 18);
+    if (bm >= 5) SFX.jackpot();
     boss = null; shots = []; bossDone = true;
     stageClear();
   }
@@ -3736,7 +3782,9 @@
     ctx.fillRect(10, y, w * boss.hp / boss.maxHp, 8);
     ctx.fillStyle = '#ffffff'; ctx.font = 'bold 10px -apple-system, "Hiragino Sans", sans-serif';
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText(boss.name + (stage === STAGES ? '（ラスボス）' : ''), 12, y + 10);
+    ctx.fillText(boss.name + (isLastOfLoop(stage) ? '（ラスボス）' : ''), 12, y + 10);
+    ctx.save(); ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.fillText(`HP×${boss.ballK.toFixed(1)}（ボール${liveBalls()}個）`, W - 12, y + 10); ctx.restore();
   }
 
   // ちょっとした文字表示（アイテム名・PERFECTなど）
@@ -4451,7 +4499,7 @@
     ctx.textAlign = 'left';
     ctx.fillStyle = th.accent;
     ctx.font = 'bold 11px -apple-system, "Hiragino Sans", sans-serif';
-    ctx.fillText(`STAGE ${stage}  ${th.name}`, 54, top / 2 - 4); // 左上の巻き戻しボタンの右
+    ctx.fillText(`STAGE ${stage}` + (loopOf(stage) ? `  ${loopOf(stage) + 1}周目` : ''), 54, top / 2 - 4); // 左上の巻き戻しボタンの右
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 16px -apple-system, "Hiragino Sans", sans-serif';
     ctx.fillText('SCORE ' + score, 54, top / 2 + 12);
@@ -4748,7 +4796,7 @@
   {
     const box = makeSection('サウンドテスト', sliderBox);
     const list = [['title', 'タイトル']];
-    for (let n = 1; n <= STAGES; n++) list.push([songOf(n), `${n} ${themeOf(n).name}`]);
+    for (let n = 1; n <= STAGES; n++) list.push([songOf(n), `STAGE ${n}`]);
     list.push(['boss', 'ボス'], ['last', 'ラスボス'], ['j:clear', 'クリア'], ['j:over', 'ゲームオーバー'], ['j:allclear', 'オールクリア']);
     const grid = document.createElement('div'); grid.className = 'songBtns';
     const btns = [];
@@ -4822,8 +4870,8 @@
       ${row(capOf('バンパー', '#ff5fd2'), '当たるとボールが加速。LASERでしか削れない')}
       ${row(capOf('巨大岩', '#8d6e63'), 'いわステージ。ボスより硬いが、壊すと大量スコア＋アイテム3個')}
       <h3>降りてくるブロック</h3>ブロックは上から少しずつ降りてきて、画面の下へ流れて消えます。画面に少ないと速く降ります。`],
-    ['ステージ', () => `全${STAGES}ステージ。最後に出るボスを倒すとクリア。クリアごとにパワーアップを1つ選べます（ゲームオーバーまで続く）。` +
-      Array.from({ length: STAGES }, (_, i) => { const t = themeOf(i + 1); return row(`<b style="color:${t.accent};min-width:72px">${i + 1} ${t.name}</b>`, (STAGE_HINTS[t.key] || '').replace(/^[^：]*：/, '')); }).join('')],
+    ['ステージ', () => `全${STAGES}ステージで1周。各ステージの最後に出るボスを倒すとクリア。クリアごとにパワーアップを1つ選べます（ゲームオーバーまで続く）。<br>ステージ${STAGES}の次は2周目（ステージ${STAGES + 1}〜）。周を重ねるほどブロックが硬く、降りてくるのが速くなる。終わりなき戦い、ハイスコア勝負！` +
+      Array.from({ length: STAGES }, (_, i) => { const t = themeOf(i + 1); return row(`<b style="color:${t.accent};min-width:72px">STAGE ${i + 1}</b>`, (STAGE_HINTS[t.key] || '').replace(/^[^：]*：/, '')); }).join('')],
     ['スコア', () => `
       ${row('<b>ラリー</b>', 'パドルで打ち返し続けると倍率アップ（最大×4）')}
       ${row('<b>コンボ</b>', 'ブロックを壊し続けると10コンボごとに倍率+0.5（最大×5）。4秒壊さないかミスで終了')}
@@ -4872,7 +4920,7 @@
     if (!open) { // サウンドテストのあと、今の場面の曲に戻す
       soundTestBtns.forEach(x => x.classList.remove('on'));
       if (state === 'title') SFX.music.play('title');
-      else if (state === 'play' || state === 'ready') SFX.music.play(boss ? (stage === STAGES ? 'last' : 'boss') : songOf(stage));
+      else if (state === 'play' || state === 'ready') SFX.music.play(boss ? (isLastOfLoop(stage) ? 'last' : 'boss') : songOf(stage));
       else SFX.music.stop();
       SFX.music.pause(paused);
     }
@@ -5224,7 +5272,7 @@
     boss = sn.boss ? { ...sn.boss } : null;
     shots = sn.shots.map(x => ({ ...x }));
     moveBricks(0);
-    if (state === 'play' || state === 'ready') SFX.music.play(boss ? (stage === STAGES ? 'last' : 'boss') : songOf(stage));
+    if (state === 'play' || state === 'ready') SFX.music.play(boss ? (isLastOfLoop(stage) ? 'last' : 'boss') : songOf(stage));
     SFX.music.setFever(fever > 0);
   }
   // ボールは数値の配列に詰めて記録（数が多くても軽い）

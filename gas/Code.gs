@@ -44,7 +44,7 @@ function doPost(e) {
   const score = Math.floor(Number(d.score));
   const stage = Math.floor(Number(d.stage));
   const rally = Math.floor(Number(d.rally)) || 0;
-  if (!(score >= 0 && score <= MAX_SCORE) || !(stage >= 1 && stage <= 10)) {
+  if (!(score >= 0 && score <= MAX_SCORE) || !(stage >= 1 && stage <= 9999)) {
     return json_({ ok: false, error: 'invalid' });
   }
   const lock = LockService.getScriptLock();
