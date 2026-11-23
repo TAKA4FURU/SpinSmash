@@ -183,7 +183,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.23</div>
+    <div id="ver">ver 0.0.24</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -2041,7 +2041,7 @@
       }
     }
     updateLowest();
-    if (passed) { registerGrid(); if (state === 'play' && aliveCount <= 0 && !boss) stageClear(); }
+    if (passed) { registerGrid(); checkBoss(); if (state === 'play' && aliveCount <= 0 && !boss && bossDone) stageClear(); }
     // パドルはいつでも画面の上の方まで（ボス戦はボスのすぐ真下まで）
     paddle.minY = paddleTopLimit();
     if (paddle.y < paddle.minY) paddle.y = paddle.minY;
@@ -2082,7 +2082,7 @@
     for (const b of balls) b.dead = true;
     if (lives <= 0) { state = 'over'; SFX.music.jingle('over'); eff.magnet = 0; return; }
     resetBall();
-    if (aliveCount <= 0 && !boss) { state = 'play'; stageClear(); }
+    checkBoss(); // クラッシュで消えたブロックでも、ボスを出さずにクリアにはならない
   }
 
   // ヒビの形（ブロック内の相対座標 0〜1）。HPが減るほど本数が増える
@@ -2983,8 +2983,13 @@
     if (key === 'fire' && source !== 'fire') burn(b);
     if (key === 'electric' && source === 'ball') zap(b, b.maxHp * 0.5);
     // 残りわずかになったらボス登場（残ったブロックはそのまま。アイテムも出る）
-    if (!boss && !bossDone && aliveCount <= Math.floor(brickTotal * CFG.bossAt / 100)) spawnBoss();
+    checkBoss();
     return true;
+  }
+  // ブロックが減った時（壊した・画面外へ流れた・クラッシュで消えた）：残りわずかならボス登場。
+  // ボスを倒すまではステージクリアにしない
+  function checkBoss() {
+    if (!boss && !bossDone && aliveCount <= Math.floor(brickTotal * CFG.bossAt / 100)) spawnBoss();
   }
 
   // ---- 特殊ブロックの効果 ----
