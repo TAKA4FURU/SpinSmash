@@ -185,7 +185,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.25</div>
+    <div id="ver">ver 0.0.26</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -2078,7 +2078,7 @@
     registerGrid();
     SFX.selfDestruct();
     explode(cx, cy); explode(cx - paddle.w * 0.3, cy); explode(cx + paddle.w * 0.3, cy);
-    addPopup(cx, cy - 30, 'クラッシュ！', '#ff6b6b', 22);
+    addPopup(cx, cy - 30, 'CRASH!', '#ff6b6b', 22);
     lives--;
     endCombo();
     feverGauge = 0;
@@ -2326,7 +2326,7 @@
     buildBg(themeOf(n));
     SFX.music.play(songOf(n));
     const t = themeOf(n);
-    banner = { text: `STAGE ${n}`, sub: loopOf(n) ? `${loopOf(n) + 1}周目` : '', color: t.accent, life: 2.2 };
+    banner = { text: `STAGE ${n}`, sub: loopOf(n) ? `LOOP ${loopOf(n) + 1}` : '', color: t.accent, life: 2.2 };
   }
 
   // ランキングに送れるのは、遊びに関わる設定が初期値のままのプレイだけ（巻き戻しはOK）
@@ -2896,7 +2896,7 @@
     if (ball.vy > 0 && ball.y + ball.r >= floorY && (eff.barrier > 0 || fever > 0)) {
       ball.y = floorY - ball.r;
       ball.vy = -Math.abs(ball.vy);
-      if (fever <= 0) { eff.barrier--; addPopup(ball.x, floorY - 20, eff.barrier > 0 ? `BARRIER! のこり${eff.barrier}` : 'BARRIER!', '#7df9ff'); }
+      if (fever <= 0) { eff.barrier--; addPopup(ball.x, floorY - 20, eff.barrier > 0 ? `BARRIER! ×${eff.barrier}` : 'BARRIER!', '#7df9ff'); }
       SFX.wall(1);
     }
 
@@ -2941,7 +2941,7 @@
     if (b.kind === 'giant') raw = Math.min(raw, source === 'ball' ? Math.max(150, ballDamage()) : 60); // 爆弾やフィーバーで一撃にはしない
     if (b.kind === 'crystal' && !eff.laser && source !== 'bomb') { // 水晶：レーザー以外は弾く
       b.hitT = 1;
-      if (source === 'ball') { SFX.crystalTink(); if (!hintSeen['crystalTip']) { markSeen('crystalTip'); addPopup(b.x + b.w / 2, b.y + b.h + 14, 'レーザーで壊せる！', '#bff6ff'); } }
+      if (source === 'ball') { SFX.crystalTink(); if (!hintSeen['crystalTip']) { markSeen('crystalTip'); addPopup(b.x + b.w / 2, b.y + b.h + 14, 'LASER ONLY!', '#bff6ff'); } }
       return false;
     }
     if (b.kind === 'crystal' && source === 'bomb') return false;
@@ -2983,7 +2983,7 @@
     if (SOLID[b.kind]) solidBreak(b);
     if (b.kind === 'bomb') bombBlast(b);
     else if (b.kind === 'split') splitBrick(b);
-    else if (b.kind === 'chest') { dropItem(b); addPopup(b.x + b.w / 2, b.y, '宝箱！', '#ffd23f'); }
+    else if (b.kind === 'chest') { dropItem(b); addPopup(b.x + b.w / 2, b.y, 'TREASURE!', '#ffd23f'); }
     if (source === 'ball' && upN('split') && Math.random() < 0.04 * upN('split')) splitBall();
     if (upN('boom') && source !== 'boom') boomAround(b);
     const s2 = speedOf() || 1;
@@ -3033,7 +3033,7 @@
     const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
     for (let i = 0; i < 3; i++) explode(cx + (Math.random() - 0.5) * b.w, cy + (Math.random() - 0.5) * b.h);
     laserSpark(cx, cy, 20);
-    addPopup(W / 2, H * 0.42, b.kind === 'bumper' ? 'バンパー破壊！！' : '鉄板破壊！！', '#ffffff', 28);
+    addPopup(W / 2, H * 0.42, b.kind === 'bumper' ? 'BUMPER BREAK!!' : 'STEEL BREAK!!', '#ffffff', 28);
     addPopup(W / 2, H * 0.42 + 32, `+${bonus.toLocaleString()}`, '#ffe28a', 22);
     SFX.bomb(); SFX.jackpot();
     hitStopCool = 0; doHitStop(0.12);
@@ -3060,7 +3060,7 @@
     const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
     for (let i = 0; i < 5; i++) explode(cx + (Math.random() - 0.5) * b.w, cy + (Math.random() - 0.5) * b.h);
     for (let i = 0; i < 3; i++) dropItem({ x: b.x + b.w * (0.2 + 0.3 * i), y: b.y, w: 0, h: b.h });
-    addPopup(W / 2, H * 0.4, '巨岩粉砕！！', '#ffb74d', 30);
+    addPopup(W / 2, H * 0.4, 'BOULDER CRUSH!!', '#ffb74d', 30);
     addPopup(W / 2, H * 0.4 + 34, `+${bonus.toLocaleString()}`, '#fff3c4', 24);
     SFX.bomb(); SFX.jackpot();
     hitStopCool = 0; doHitStop(0.18);
@@ -3091,7 +3091,7 @@
     }
     for (const k of kids) { bricks.push(k); aliveCount++; brickTotal++; }
     layoutBricks();
-    addPopup(b.x + b.w / 2, b.y, '分裂！', '#2fe0c0');
+    addPopup(b.x + b.w / 2, b.y, 'SPLIT!', '#2fe0c0');
   }
 
   // ---- コンボ ----
@@ -3104,7 +3104,7 @@
     }
   }
   function endCombo() {
-    if (combo >= 10) { addPopup(W / 2, H * 0.45, `${combo} COMBO おわり`, 'rgba(255,255,255,0.8)'); popups[popups.length - 1].back = true; }
+    if (combo >= 10) { addPopup(W / 2, H * 0.45, `${combo} COMBO END`, 'rgba(255,255,255,0.8)'); popups[popups.length - 1].back = true; }
     combo = 0; comboT = 0;
   }
   // 分裂：今のボールから1個増やす
@@ -3152,7 +3152,7 @@
     state = 'stageClear'; stageTimer = 2.6; SFX.music.jingle('clear'); SFX.music.setFever(false);
     for (const k of bricks) k.reviveT = 0;
     score += 500 * stage;
-    banner = { text: 'STAGE CLEAR!', sub: `ボーナス +${500 * stage}`, color: '#fff27a', life: 2.2 };
+    banner = { text: 'STAGE CLEAR!', sub: `BONUS +${500 * stage}`, color: '#fff27a', life: 2.2 };
   }
 
   // ほのお：倒したブロックの周り8マスに延焼ダメージ
@@ -3275,12 +3275,12 @@
     { id: 'laser',   label: 'LASER',   color: '#ff3b3b', w: 3 },
     { id: 'hispeed', label: 'HI-SPEED', color: '#ff6d00', w: 9, text: '#ffffff' }, // お邪魔：ボールが速くなる（次のミスまで・威力は変わらない）
     { id: 'help',    label: 'HELP',    color: '#7cffcb', w: 8 },  // 画面の一番下にヘルプパドル（次のミスまで）  // ボールがレーザーに（次のミスまで）
-    { id: 'ghost',   label: '透明',    color: '#3a3f55', w: 8, text: '#9aa0b8' }, // ハズレ
+    { id: 'ghost',   label: 'GHOST',   color: '#3a3f55', w: 8, text: '#9aa0b8' }, // ハズレ
     // スコア用の宝石（安いほど出やすい。点数×ステージ数×倍率）
-    { id: 'gem1',    label: '◆銅',     color: '#cd7f32', w: 70, gem: 1000 },
-    { id: 'gem2',    label: '◆銀',     color: '#c9d2e3', w: 45, gem: 5000 },
-    { id: 'gem3',    label: '◆金',     color: '#ffd700', w: 25, gem: 20000 },
-    { id: 'gem4',    label: '◆ダイヤ', color: '#9ff3ff', w: 8,  gem: 100000 },
+    { id: 'gem1',    label: 'BRONZE',  color: '#cd7f32', w: 70, gem: 1000 },
+    { id: 'gem2',    label: 'SILVER',  color: '#c9d2e3', w: 45, gem: 5000 },
+    { id: 'gem3',    label: 'GOLD',    color: '#ffd700', w: 25, gem: 20000 },
+    { id: 'gem4',    label: 'DIAMOND', color: '#9ff3ff', w: 8,  gem: 100000 },
   ];
   let items = [];
   const eff = { wide: 0, wideLv: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0, laser: 0, help: 0, hs: 0 };
@@ -3421,7 +3421,7 @@
       // せいぶつ：倒したブロックが時々復活
       if (!b.alive && b.reviveT > 0) {
         b.reviveT -= dt;
-        if (b.reviveT <= 0) { b.alive = true; aliveCount++; b.revived = true; b.hp = Math.round(b.maxHp * 0.5); b.hitT = 1; addPopup(b.x + b.w / 2, b.y, '復活', '#ff6f91'); }
+        if (b.reviveT <= 0) { b.alive = true; aliveCount++; b.revived = true; b.hp = Math.round(b.maxHp * 0.5); b.hitT = 1; addPopup(b.x + b.w / 2, b.y, 'REVIVE', '#ff6f91'); }
       }
     }
     // みず：画面中央の水流（5秒ごとに向きが変わる）／ひこう：時々横風
@@ -3460,24 +3460,24 @@
       fever = 8; feverGauge = 0;
       SFX.feverStart();
       SFX.music.setFever(true);
-      banner = { text: 'FEVER!!', sub: '8秒間 一撃・落ちない・スコア2倍', color: '#ff7ae0', life: 1.8, back: true };
+      banner = { text: 'FEVER!!', sub: '8 SEC  ONE-HIT KILL / NO DROP / SCORE ×2', color: '#ff7ae0', life: 1.8, back: true };
     }
   }
 
   // ---- ボス ----
   // shot: n=弾数 spread=広がり(rad) speed=速さ(画面高さ/秒) aim=パドル狙い wobble=揺れ grav=重力 homing=追尾 warn=予告(秒)
   const BOSSES = {
-    space:    { name: 'ギャラクシーUFO',    shot: { n: 2, spread: 0.4,  speed: 0.28, size: 6,  color: '#9dfcff' } },
-    grass:    { name: 'フロラ・グランデ',   shot: { n: 3, spread: 0.35, speed: 0.35, size: 6,  color: '#b6ff7a' } },
-    water:    { name: 'アクアジェリー',     shot: { n: 4, spread: 0.6,  speed: 0.22, size: 9,  color: '#8fd8ff', wobble: 1 } },
-    fire:     { name: 'イグニス',           shot: { n: 1, spread: 0,    speed: 0.5,  size: 9,  color: '#ff7a1a', aim: true, burst: 3 } },
-    electric: { name: 'ボルトクラウド',     shot: { n: 1, spread: 0,    speed: 1.3,  size: 5,  color: '#ffe14d', aim: true, warn: 0.7 } },
-    sky:      { name: 'ゲイルホーク',       shot: { n: 5, spread: 0.9,  speed: 0.3,  size: 6,  color: '#e6f4ff', wobble: 1.5 } },
-    rock:     { name: 'ガンセキゴーレム',   shot: { n: 2, spread: 0.5,  speed: 0.1,  size: 13, color: '#a1887f', grav: 0.9 } },
-    ice:      { name: 'フロストクリスタ',   shot: { n: 3, spread: 0.25, speed: 0.6,  size: 6,  color: '#bdf3ff' } },
-    poison:   { name: 'ヴェノムスライム',   shot: { n: 6, spread: 1.2,  speed: 0.25, size: 8,  color: '#9cff57', grav: 0.2 } },
-    steel:    { name: 'アイアンフォート',   shot: { n: 5, spread: 0.7,  speed: 0.45, size: 5,  color: '#e0e6ea', aim: true } },
-    bio:      { name: 'セルマザー',         shot: { n: 4, spread: 0.8,  speed: 0.3,  size: 8,  color: '#ff6f91', homing: 0.9 } },
+    space:    { name: 'GALAXY UFO',    shot: { n: 2, spread: 0.4,  speed: 0.28, size: 6,  color: '#9dfcff' } },
+    grass:    { name: 'FLORA GRANDE',   shot: { n: 3, spread: 0.35, speed: 0.35, size: 6,  color: '#b6ff7a' } },
+    water:    { name: 'AQUA JELLY',     shot: { n: 4, spread: 0.6,  speed: 0.22, size: 9,  color: '#8fd8ff', wobble: 1 } },
+    fire:     { name: 'IGNIS',           shot: { n: 1, spread: 0,    speed: 0.5,  size: 9,  color: '#ff7a1a', aim: true, burst: 3 } },
+    electric: { name: 'BOLT CLOUD',     shot: { n: 1, spread: 0,    speed: 1.3,  size: 5,  color: '#ffe14d', aim: true, warn: 0.7 } },
+    sky:      { name: 'GALE HAWK',       shot: { n: 5, spread: 0.9,  speed: 0.3,  size: 6,  color: '#e6f4ff', wobble: 1.5 } },
+    rock:     { name: 'BOULDER GOLEM',   shot: { n: 2, spread: 0.5,  speed: 0.1,  size: 13, color: '#a1887f', grav: 0.9 } },
+    ice:      { name: 'FROST CRYSTA',   shot: { n: 3, spread: 0.25, speed: 0.6,  size: 6,  color: '#bdf3ff' } },
+    poison:   { name: 'VENOM SLIME',   shot: { n: 6, spread: 1.2,  speed: 0.25, size: 8,  color: '#9cff57', grav: 0.2 } },
+    steel:    { name: 'IRON FORT',   shot: { n: 5, spread: 0.7,  speed: 0.45, size: 5,  color: '#e0e6ea', aim: true } },
+    bio:      { name: 'CELL MOTHER',         shot: { n: 4, spread: 0.8,  speed: 0.3,  size: 8,  color: '#ff6f91', homing: 0.9 } },
   };
   let boss = null, shots = [], bossDone = false;
 
@@ -3564,7 +3564,7 @@
         s.dead = true;
         eff.stun = boss && boss.key === 'electric' ? 1.8 : 1.2;
         SFX.stunned();
-        addPopup(paddle.x, paddle.y - 26, 'しびれた！', '#ff9b9b');
+        addPopup(paddle.x, paddle.y - 26, 'STUNNED!', '#ff9b9b');
       }
       if (s.y > H + 30 || s.x < -40 || s.x > W + 40) s.dead = true;
     }
@@ -3642,13 +3642,13 @@
       if (n++ < 40) spawnParticles(k, 0, 1, 0.5);
     }
     aliveCount = 0;
-    if (n) { SFX.burn(); addPopup(W / 2, brickBottom + 20, `残り${n}個 爆破！`, '#ff9f1a'); }
+    if (n) { SFX.burn(); addPopup(W / 2, brickBottom + 20, `${n} BLOCKS BLASTED!`, '#ff9f1a'); }
     for (let i = 0; i < 4; i++) explode(b.x + (Math.random() - 0.5) * b.w, b.y + (Math.random() - 0.5) * b.h + H * 0.05);
     // 撃破ボーナス：ボールが少ないほど高い（1個＝×10、2〜3個＝×5、4〜9個＝×2）
     const nb = liveBalls(), bm = bossBonusMult(nb), bonus = Math.ceil(50000 * stage * bm * scoreMult());
     score += bonus;
     addPopup(W / 2, H * 0.36, `BOSS BONUS ×${bm}`, bm >= 5 ? '#ffd700' : '#fff27a', bm >= 5 ? 30 : 22);
-    addPopup(W / 2, H * 0.36 + 34, `+${bonus.toLocaleString()}（ボール${nb}個）`, '#fff6b0', 18);
+    addPopup(W / 2, H * 0.36 + 34, `+${bonus.toLocaleString()} (${nb} BALL${nb > 1 ? 'S' : ''})`, '#fff6b0', 18);
     if (bm >= 5) SFX.jackpot();
     boss = null; shots = []; bossDone = true;
     stageClear();
@@ -3802,9 +3802,9 @@
     ctx.fillRect(10, y, w * boss.hp / boss.maxHp, 8);
     ctx.fillStyle = '#ffffff'; ctx.font = 'bold 10px -apple-system, "Hiragino Sans", sans-serif';
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText(boss.name + (isLastOfLoop(stage) ? '（ラスボス）' : ''), 12, y + 10);
+    ctx.fillText(boss.name + (isLastOfLoop(stage) ? '  - FINAL BOSS -' : ''), 12, y + 10);
     ctx.save(); ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.fillText(`HP×${boss.ballK.toFixed(1)}（ボール${liveBalls()}個）`, W - 12, y + 10); ctx.restore();
+    ctx.fillText(`HP ×${boss.ballK.toFixed(1)} (${liveBalls()} BALL${liveBalls() > 1 ? 'S' : ''})`, W - 12, y + 10); ctx.restore();
   }
 
   // ちょっとした文字表示（アイテム名・PERFECTなど）
@@ -4470,13 +4470,13 @@
     const chips = [];
     if (eff.wide > 0) chips.push([`WIDE${eff.wideLv}`, eff.wide, '#4dd8ff']);
     if (eff.power > 0) chips.push(['POW', eff.power, '#ff4d6d']);
-    if (eff.poison > 0) chips.push(['毒', eff.poison, '#7cff3a']);
+    if (eff.poison > 0) chips.push(['POISON', eff.poison, '#7cff3a']);
     if (eff.barrier > 0) chips.push([`BAR×${eff.barrier}`, 0, '#7df9ff']);
     if (eff.magnet > 0) chips.push(['MAG', 0, '#b388ff']);
     if (eff.help > 0) chips.push(['HELP', 0, '#7cffcb']);
     if (eff.hs > 0) chips.push([`SPEED+${eff.hs}`, 0, '#ff9e40']);
     if (eff.laser > 0) chips.push(['LASER', 0, eff.magnet > 0 ? '#b388ff' : '#ff3b3b']);
-    if (eff.ghost > 0) chips.push(['透明', eff.ghost, '#9aa0b8']);
+    if (eff.ghost > 0) chips.push(['GHOST', eff.ghost, '#9aa0b8']);
     if (balls.length > 1) chips.push([`●×${balls.length}`, 0, '#ffffff']);
     ctx.font = 'bold 10px -apple-system, sans-serif';
     let cxp = 10; // 文字の長さに合わせて並べる（重ならないように）
@@ -4490,7 +4490,7 @@
     ctx.textAlign = 'right';
     if (hiAtStart > 0) {
       ctx.font = 'bold 10px -apple-system, "Hiragino Sans", sans-serif';
-      if (score < hiAtStart) { ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillText(`HIまで あと ${(hiAtStart - score).toLocaleString()}`, W - 140, top / 2 - 10); }
+      if (score < hiAtStart) { ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillText(`HI-SCORE −${(hiAtStart - score).toLocaleString()}`, W - 140, top / 2 - 10); }
       else { ctx.fillStyle = '#ffd23f'; ctx.fillText('NEW RECORD!', W - 140, top / 2 - 10); }
     }
     ctx.textAlign = 'left';
@@ -4540,7 +4540,7 @@
     ctx.textAlign = 'left';
     ctx.fillStyle = th.accent;
     ctx.font = 'bold 11px -apple-system, "Hiragino Sans", sans-serif';
-    ctx.fillText(`STAGE ${stage}` + (loopOf(stage) ? `  ${loopOf(stage) + 1}周目` : ''), 54, top / 2 - 4); // 左上の巻き戻しボタンの右
+    ctx.fillText(`STAGE ${stage}` + (loopOf(stage) ? `  LOOP ${loopOf(stage) + 1}` : ''), 54, top / 2 - 4); // 左上の巻き戻しボタンの右
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 16px -apple-system, "Hiragino Sans", sans-serif';
     ctx.fillText('SCORE ' + score, 54, top / 2 + 12);
@@ -5371,7 +5371,7 @@
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.fillText('◀◀ REWIND', W / 2, H * 0.3);
     ctx.font = 'bold 12px -apple-system, "Hiragino Sans", sans-serif';
-    ctx.fillText(`のこり ${(history.length / 30).toFixed(1)} 秒`, W / 2, H * 0.3 + 26);
+    ctx.fillText(`${(history.length / 30).toFixed(1)} SEC LEFT`, W / 2, H * 0.3 + 26);
   }
 
   // ---- ループ ----
