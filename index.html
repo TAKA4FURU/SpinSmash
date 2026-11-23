@@ -187,7 +187,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.27</div>
+    <div id="ver">ver 0.0.28</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -605,8 +605,8 @@
     liftDecay:  1.5,   // 強打で上がった速度が元に戻る速さ
     slowPower:  0.12,
     startLives: 5,     // ゲーム開始時の残機
-    maxBalls:   1024,  // ボールの上限（達したら ×2〜×10 は出ない・増えない）
-    laserMax:   64,    // レーザー中のボールの上限
+    maxBalls:   64,    // 通常弾の上限（達したら ×2〜×10 は出ない・増えない）
+    laserMax:   32,    // レーザー中のボールの上限
     itemRate:   1.4,   // 普通のブロックからアイテムが出る確率（%）。★ブロックは必ず出る
     itemBoost:  4,     // 残りブロックが減るほど確率アップ（残り0に近づくとこの倍率）
     objScale:   0.5,   // ボールとパドルの大きさ（1, 1/2, 1/4, 1/8）
@@ -1614,6 +1614,14 @@
         osc('sine', 1200, 1200, t + 0.32, 0.5, 0.12); osc('sine', 1800, 1800, t + 0.32, 0.4, 0.06);
         nz(t + 0.3, 0.3, 0.2, 'highpass', 5000, 0.7);
       },
+      // ボールの種類が変わった
+      weaponOn(w) {
+        if (!ok('weaponOn', 150)) return;
+        const t = now(), base = { normal: 523, spin: 659, big: 196, control: 587, fire: 392, ice: 1047, thunder: 784, poison: 330 }[w] || 523;
+        osc('square', base, base * 2, t, 0.12, 0.09); osc('triangle', base * 1.5, base * 3, t + 0.08, 0.16, 0.08);
+        if (w === 'big') osc('sine', 90, 45, t, 0.4, 0.3, drive);
+        if (w === 'fire' || w === 'thunder') nz(t, 0.25, 0.2, 'highpass', w === 'fire' ? 1500 : 4000, 0.8);
+      },
       // レーザーの反射：ピュン！
       laserPew() {
         if (!ok('laserPew', 45)) return;
@@ -1825,6 +1833,8 @@
   if (!(CFG.cfgVer >= 7)) { if (CFG.brickScale === 0.125) CFG.brickScale = DEFAULTS.brickScale; CFG.cfgVer = 7; }
   // 速度の初期値を 初速0.3→0.1・最高1.8→0.8・ビーム1.0→0.6 に変更（旧初期値のままなら新しい値に）
   if (CFG.startLives > 8) CFG.startLives = 8; // 残機の上限は8
+  // 弾数の初期値を変更：通常1024→64、レーザー64→32（旧初期値のままなら新しい値に）
+  if (!(CFG.cfgVer >= 9)) { if (CFG.maxBalls === 1024) CFG.maxBalls = 64; if (CFG.laserMax === 64) CFG.laserMax = 32; CFG.cfgVer = 9; }
   if (!(CFG.cfgVer >= 8)) {
     if (CFG.speed === 0.3) CFG.speed = DEFAULTS.speed;
     if (CFG.maxSpeed === 1.8) CFG.maxSpeed = DEFAULTS.maxSpeed;
@@ -1874,7 +1884,7 @@
   let balls = [];
   function useBall(b) { ball = b; trail = b.trail || (b.trail = []); }
   // ビーム付きで描くボールの数（多い時は減らして軽くする）
-  const beamLimit = () => balls.length > 100 ? 3 : balls.length > 30 ? 6 : 12;
+  const beamLimit = () => balls.length <= 64 ? balls.length : balls.length > 200 ? 6 : 12; // 64個までは全部にエフェクト
   let fingerDown = false, fingers = 0, releasing = false; // fingers=ゲーム画面に触れている指の数
 
   // ---- 背景：遠・中・近の3層に模様を描いておき、それぞれ違う速さでスクロール（遠近感）----
@@ -2283,6 +2293,7 @@
     trail = ball.trail;
     eff.magnet = 0; // マグネットはミスで解除
     eff.laser = 0;  // レーザーもミスで解除
+    weapon = 'normal'; owned = new Set(); // ボールの種類も、画面下の武器も全部なくなる
     eff.help = 0;   // ヘルプパドルも
     eff.hs = 0;     // ハイスピードも
     ball.r = ballR();
@@ -2408,7 +2419,7 @@
     targetX = tx;
     if (!CFG.vMove) return;
     let ty = paddleStartY + (y - touchStartY) * CFG.sensY;
-    const cy = Math.max(paddle.minY, Math.min(paddle.baseY, ty));
+    const cy = Math.max(paddle.minY, Math.min(paddleMaxY(), ty));
     if (cy !== ty) { paddleStartY -= (ty - cy); ty = cy; }
     targetY = ty;
   }
@@ -2506,6 +2517,10 @@
     shakeT = SHAKE_TIME; shakeCool = 0.45; shakeId++;
     shakeDir = dir || (Math.random() < 0.5 ? -1 : 1);
     SFX.shake();
+    if (weapon === 'control') { // コントロールボール：振るだけで壁に当てなくても高速スピン
+      for (const b of balls) if (!b.dead) b.spin = shakeDir * H * CFG.maxSpin;
+      addPopup(W / 2, H * 0.5, 'SPIN!', '#3dffb5');
+    }
   }
   function shakeKick(nx, ny) {
     if (shakeT <= 0 || ball.shk === shakeId) return;
@@ -2535,9 +2550,13 @@
     try {
       if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
         DeviceMotionEvent.requestPermission().catch(() => {});
+        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') DeviceOrientationEvent.requestPermission().catch(() => {});
       }
     } catch (e) {}
   }
+  // 左右の傾き（コントロールボール用）：-1〜1
+  let tiltX = 0;
+  addEventListener('deviceorientation', e => { if (e.gamma != null) tiltX += (Math.max(-1, Math.min(1, e.gamma / 35)) - tiltX) * 0.3; });
   addEventListener('devicemotion', e => {
     const a = e.acceleration;
     if (!a || a.x == null) return;
@@ -2615,6 +2634,7 @@
     for (const b of bricks) if (b.hitT > 0) b.hitT = Math.max(0, b.hitT - dt * 8);
     paddleGlow *= Math.exp(-dt * 7);
     helpGlow *= Math.exp(-dt * 7);
+    checkSlotGrab();
     rallyPop *= Math.exp(-dt * 6);
     for (const p of particles) {
       p.vy += H * (p.glow ? 0.3 : 1.6) * dt;
@@ -2634,6 +2654,7 @@
     if (hintT > 0 && !banner) hintT -= dt;
     if (itemTipT > 0) itemTipT -= dt;
     if (hitStopCool > 0) hitStopCool -= dt;
+    elemParticles(dt);
     if (comboT > 0 && state === 'play') { comboT -= dt; if (comboT <= 0) endCombo(); }
     if (shakeT > 0) shakeT -= dt;
     if (shakeCool > 0) shakeCool -= dt;
@@ -2663,7 +2684,7 @@
     paddle.prevX = paddle.x;
     paddle.frameStartY = paddle.y;
     if (CFG.vMove) {
-      const ty = Math.max(paddle.minY, Math.min(paddle.baseY, targetY));
+      const ty = Math.max(paddle.minY, Math.min(paddleMaxY(), targetY));
       paddle.y = eff.stun > 0 ? paddle.y + (ty - paddle.y) * Math.min(1, dt * 4) : ty;
     }
     else paddle.y = paddle.baseY;
@@ -2790,6 +2811,17 @@
     const s = speedOf();
     const a = CFG.curve * ball.spin * (themeOf(stage).key === 'ice' ? 1.5 : 1); // こおり：よく曲がる
     if (!eff.laser) applyCurrents(dt); // レーザーは水流や風でも曲がらない
+    if (ball.stuck == null && (weapon === 'spin' || weapon === 'control')) {
+      const sp0 = speedOf();
+      if (sp0 > 0) {
+        if (weapon === 'spin') { // らせん：進む向きに対して横に揺れながら進む（カーブはしない）
+          ball.spin = 0; ball.ph = (ball.ph || Math.random() * 6) + dt * 11;
+          const a = H * 2.4 * Math.cos(ball.ph) * dt;
+          ball.vx += -ball.vy / sp0 * a; ball.vy += ball.vx / sp0 * a;
+        } else ball.vx += tiltX * H * 1.6 * dt; // コントロール：iPhoneの左右の傾きで曲がる
+        setSpeed(sp0);
+      }
+    }
     const vx0 = ball.vx, vy0 = ball.vy;
     ball.vx += (-vy0 / s) * a * dt;
     ball.vy += ( vx0 / s) * a * dt;
@@ -2803,7 +2835,7 @@
       ball.extra = ne < H * 0.002 ? 0 : ne;
     }
     clampSpin();
-    ball.rot += ball.spin / ball.r * dt;
+    ball.rot += (weapon === 'spin' ? 45 * Math.sign(Math.cos(ball.ph || 0) || 1) : ball.spin / ball.r) * dt;
 
     ball.x += ball.vx * dt;
     ball.y += ball.vy * dt;
@@ -2927,6 +2959,7 @@
   // 今のボールのダメージ（POWで2倍、毒で半分）
   function ballDamage() {
     let d = damageAt(eff.laser ? Math.max(speedOf(), H * CFG.maxSpeed) : speedOf()); // レーザーは最高速度相当
+    d *= (W8().dmg || 1) * elemMult(); // ビッグは5倍、属性ボールはステージで1.3倍／0.25倍
     if (eff.power > 0) d *= 2;
     if (eff.poison > 0) d *= 0.5;
     d *= 1 + 0.25 * upN('dmg');
@@ -3019,6 +3052,18 @@
     for (let i = 0; i < n && particles.length < 180; i++) {
       const a = Math.random() * Math.PI * 2, v = H * (0.15 + Math.random() * 0.45);
       particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.25 + Math.random() * 0.2, max: 0.45, s: 1.5 + Math.random() * 2, color: col[i % 3], glow: true });
+    }
+  }
+  // 属性ボールの粒（火の粉・冷気・電気・毒の泡）。重くならないよう1フレームに数個だけ
+  function elemParticles(dt) {
+    const wp = W8(); if (!wp.glow || CFG.fx <= 0 || state !== 'play') return;
+    const n = Math.min(balls.length, 6);
+    for (let i = 0; i < n && particles.length < 170; i++) {
+      const b = balls[Math.random() * balls.length | 0]; if (!b || b.dead) continue;
+      const col = weapon === 'fire' ? (Math.random() < 0.5 ? '#ff7a1a' : '#ffd23f') : weapon === 'ice' ? '#e8fbff' : weapon === 'thunder' ? '#fff07a' : (Math.random() < 0.5 ? '#9cff57' : '#c58bff');
+      const up = weapon === 'fire' ? -H * 0.15 : weapon === 'poison' ? -H * 0.05 : 0;
+      particles.push({ x: b.x + (Math.random() - 0.5) * b.r * 2, y: b.y + (Math.random() - 0.5) * b.r * 2, vx: (Math.random() - 0.5) * H * 0.08, vy: up + (Math.random() - 0.5) * H * 0.08,
+        life: 0.35, max: 0.35, s: weapon === 'poison' ? 3 : 2, color: col, glow: weapon !== 'poison' });
     }
   }
   // バンパー：当たると加速して弾かれる（最高速度の85%まで。時間で元に戻る）
@@ -3240,7 +3285,15 @@
     ghost: '透明：ハズレ。しばらくパドルが見えなくなる（窓だけ見える）',
     hispeed: 'HI-SPEED：お邪魔アイテム！取るたびにボールが速くなる（最大3.0）。威力は上がらない。次のミスまで',
     help: 'HELP：画面の一番下にヘルプパドルが出て、自分のパドルと一緒に左右に動く。WIDEで一緒に広がる。次のミスまで',
-    laser: 'LASER：ボールが小さく強い光のレーザーに！曲がらずまっすぐ高速。普段は壊せない水晶ブロックも壊せる。64個まで・次のミスまで',
+    normalball: 'NORMAL BALL：普通のボールに戻す（64個まで）',
+    spinball: 'SPINNING BALL：いつも高速スピンして、らせんを描きながら進む。貫通はしない。32個まで',
+    bigball: 'BIG BALL：3倍の大きさで威力5倍！8個まで',
+    ctrlball: 'CONTROL BALL：iPhoneを左右に傾けるとボールが曲がる。振ると壁に当てなくても高速スピン。64個まで',
+    fireball: 'FIRE BALL：燃えるボール。くさのステージに1.3倍、ほのおのステージには0.25倍',
+    iceball: 'ICE BALL：凍ったボール。ほのおのステージに1.3倍、こおりのステージには0.25倍',
+    thunderball: 'THUNDER BALL：稲妻のボール。みず・はがねのステージに1.3倍、いわのステージには0.25倍',
+    poisonball: 'POISON BALL：毒のボール。せいぶつのステージに1.3倍、どくのステージには0.25倍',
+    laser: 'LASER：ボールが小さく強い光のレーザーに！曲がらずまっすぐ高速。普段は壊せない水晶ブロックも壊せる。32個まで',
     gem1: 'コインとダイヤ：取るとスコア。銅1K・銀5K・金20Kのコイン、六角形のダイヤは超高得点！',
   };
   const HINT_KEY = 'spinsmash-hints-seen';
@@ -3250,7 +3303,7 @@
   let hintText = '', hintT = 0, itemTip = '', itemTipT = 0;
   const HINT_TIME = 3.2;
   // まだ説明していないアイテム（出やすい順）を最大2つ、ヒントに添える
-  const ITEM_INTRO = ['gem1', 'wide', 'power', 'barrier', 'spin', 'slow', 'multi2', 'magnet', 'laser', 'help', 'oneup', 'ghost', 'hispeed', 'multi3', 'multi5', 'multi10'];
+  const ITEM_INTRO = ['gem1', 'wide', 'power', 'barrier', 'spin', 'slow', 'multi2', 'magnet', 'laser', 'fireball', 'bigball', 'help', 'spinball', 'iceball', 'ctrlball', 'thunderball', 'poisonball', 'normalball', 'oneup', 'ghost', 'hispeed', 'multi3', 'multi5', 'multi10'];
   let hintItems = [];
   function pickHint(key) {
     hintItems = ITEM_INTRO.filter(id => !hintSeen['item:' + id]).slice(0, 2);
@@ -3276,7 +3329,15 @@
     { id: 'multi5',  label: '×5',      color: '#ff8c42', w: 5,  mult: 5 },
     { id: 'multi10', label: '×10',     color: '#ff5e5e', w: 2,  mult: 10 },
     { id: 'magnet',  label: 'MAG',     color: '#b388ff', w: 10 },
-    { id: 'laser',   label: 'LASER',   color: '#ff3b3b', w: 3 },
+    { id: 'laser',   label: 'LASER',   color: '#ff3b3b', w: 3, weapon: 'laser' },  // ボールがレーザーに（次のミスまで）
+    { id: 'normalball',  label: 'NORMAL',  color: '#ffffff', w: 3, weapon: 'normal' },
+    { id: 'spinball',    label: 'SPIN BALL', color: '#ff7ae0', w: 3, weapon: 'spin' },
+    { id: 'bigball',     label: 'BIG',     color: '#ffb74d', w: 3, weapon: 'big' },
+    { id: 'ctrlball',    label: 'CONTROL', color: '#3dffb5', w: 3, weapon: 'control' },
+    { id: 'fireball',    label: 'FIRE',    color: '#ff5a1a', w: 3, weapon: 'fire' },
+    { id: 'iceball',     label: 'ICE',     color: '#7fe7ff', w: 3, weapon: 'ice' },
+    { id: 'thunderball', label: 'THUNDER', color: '#ffd400', w: 3, weapon: 'thunder' },
+    { id: 'poisonball',  label: 'POISON',  color: '#9cff57', w: 3, weapon: 'poison' },
     { id: 'hispeed', label: 'HI-SPEED', color: '#ff6d00', w: 9, text: '#ffffff' }, // お邪魔：ボールが速くなる（次のミスまで・威力は変わらない）
     { id: 'help',    label: 'HELP',    color: '#7cffcb', w: 8 },  // 画面の一番下にヘルプパドル（次のミスまで）  // ボールがレーザーに（次のミスまで）
     { id: 'ghost',   label: 'GHOST',   color: '#3a3f55', w: 8, text: '#9aa0b8' }, // ハズレ
@@ -3288,13 +3349,49 @@
   ];
   let items = [];
   const eff = { wide: 0, wideLv: 0, power: 0, poison: 0, barrier: 0, stun: 0, safe: 0, ghost: 0, magnet: 0, laser: 0, help: 0, hs: 0 };
-  const laserMax = () => Math.round(CFG.laserMax || 64);
-  const ballCap = () => eff.laser ? laserMax() : CFG.maxBalls;
+  const laserMax = () => Math.round(CFG.laserMax || 32);
+  // ---- ボールの種類（武器）。アイテムで切り替え、取った種類は画面の一番下に並ぶ。ミスで全部なくなる ----
+  const WEAPONS = {
+    normal:  { name: 'NORMAL',  cap: () => CFG.maxBalls, r: 1 },
+    laser:   { name: 'LASER',   cap: laserMax, r: 0.4 },
+    spin:    { name: 'SPINNING', cap: () => 32, r: 1, colors: ['#ff7ae0', '#7df9ff'] },
+    big:     { name: 'BIG',     cap: () => 8, r: 3, dmg: 5 },
+    control: { name: 'CONTROL', cap: () => CFG.maxBalls, r: 1, colors: ['#2a8cff', '#3dffb5'] },
+    fire:    { name: 'FIRE',    cap: () => CFG.maxBalls, r: 1, colors: ['#ff4a12', '#ffc23d'], elem: { grass: 1.3, fire: 0.25 }, glow: '255,110,30' },
+    ice:     { name: 'ICE',     cap: () => CFG.maxBalls, r: 1, colors: ['#5fd3ff', '#f2fdff'], elem: { fire: 1.3, ice: 0.25 }, glow: '140,230,255' },
+    thunder: { name: 'THUNDER', cap: () => CFG.maxBalls, r: 1, colors: ['#ffd400', '#fff8c4'], elem: { water: 1.3, steel: 1.3, rock: 0.25 }, glow: '255,230,60' },
+    poison:  { name: 'POISON',  cap: () => CFG.maxBalls, r: 1, colors: ['#7cff3a', '#a64dff'], elem: { bio: 1.3, poison: 0.25 }, glow: '150,255,80' },
+  };
+  const WEAPON_ORDER = ['normal', 'laser', 'spin', 'big', 'control', 'fire', 'ice', 'thunder', 'poison'];
+  let weapon = 'normal', owned = new Set();
+  const W8 = () => WEAPONS[weapon] || WEAPONS.normal;
+  const ballCap = () => W8().cap();
+  function setWeapon(w, silent) {
+    if (!WEAPONS[w]) return;
+    const was = weapon;
+    weapon = w; eff.laser = w === 'laser' ? 1 : 0;
+    if (w !== 'normal') owned.add('normal');
+    owned.add(w);
+    balls = balls.filter(b => !b.dead).slice(0, Math.max(1, ballCap())); // 上限を超えた分は消える
+    const lt = H * CFG.maxSpeed * 0.8;
+    for (const b of balls) {
+      b.r = ballR();
+      if (w === 'laser' || w === 'spin') b.spin = 0;
+      if (w === 'laser' && b.stuck == null) { useBall(b); if (speedOf() > 0) setSpeed(Math.max(speedOf(), lt)); }
+    }
+    useBall(balls[0]);
+    if (!silent && was !== w) {
+      if (w === 'laser') SFX.laserOn(); else SFX.weaponOn(w);
+      addPopup(W / 2, paddle.y - 40, `${WEAPONS[w].name} BALL`, WEAPONS[w].colors ? WEAPONS[w].colors[1] : (w === 'big' ? '#ffb74d' : '#ffffff'), 20);
+    }
+  }
+  // 武器ごとの属性ダメージ（ステージの種類で効き目が変わる）
+  const elemMult = () => { const e = W8().elem; return e ? (e[themeOf(stage).key] || 1) : 1; };
   // 今の最高速度：ハイスピード（お邪魔）を取るたびに+0.5、最大3.0（威力は通常の最高速度のまま）
   const HS_STEP = 0.5, HS_MAX = 3.0;
   const maxSp = () => H * Math.min(HS_MAX, Math.max(CFG.maxSpeed, CFG.maxSpeed + HS_STEP * (eff.hs || 0)));
   const hsFloor = () => H * (CFG.speed + HS_STEP * (eff.hs || 0));
-  const ballR = () => Math.max(2, W * 0.022 * objK()) * (eff.laser ? 0.4 : 1);
+  const ballR = () => Math.max(2, W * 0.022 * objK()) * W8().r;
   const WIDE_MULT = [1, 1.5, 2, 2.5]; // WIDEを重ねて取ると3段階まで広がる // アイテム・毒の効果時間
   function dropItem(b) {
     // ボールが上限なら、増えるアイテムは出さない
@@ -3364,14 +3461,7 @@
       useBall(balls[0]);
       SFX.beamOn();
     }
-    if (it.id === 'laser') { // レーザー：小さく・まっすぐ・高速。16個を超える分は消える
-      eff.laser = 1;
-      balls = balls.filter(b => !b.dead).slice(0, laserMax());
-      const lt = H * CFG.maxSpeed * 0.8;
-      for (const b of balls) { b.r = ballR(); b.spin = 0; if (b.stuck == null) { useBall(b); if (speedOf() > 0) setSpeed(Math.max(speedOf(), lt)); } }
-      useBall(balls[0]);
-      SFX.laserOn();
-    }
+    if (it.weapon) setWeapon(it.weapon); // ボールの種類を切り替え（取った種類は画面下に並ぶ）
     if (it.id === 'ghost') eff.ghost = 6;    // ハズレ：6秒間パドルが見えない
     if (state === 'play' && (it.id === 'spin' || it.id === 'slow')) {
       for (const b of balls) {
@@ -3387,7 +3477,7 @@
     if (it.id === 'oneup') gainLife(it.x);
     else if (it.id === 'ghost') SFX.ghost();
     else SFX.item();
-    addPopup(it.x, paddle.y - 24, it.label === '1UP' ? '1UP!' : it.label, it.color);
+    if (!it.weapon) addPopup(it.x, paddle.y - 24, it.label === '1UP' ? '1UP!' : it.label, it.color);
     score += 50;
   }
 
@@ -4097,9 +4187,32 @@
   }
 
   // マグネット状態のボールは紫の濃淡2色（回転は見えたまま）
-  const ballColA = () => eff.magnet > 0 ? '#7c4dff' : BALL_COLOR_A;
-  const ballColB = () => eff.magnet > 0 ? '#d4b8ff' : BALL_COLOR_B;
+  const ballColA = () => eff.magnet > 0 ? '#7c4dff' : (W8().colors ? W8().colors[0] : BALL_COLOR_A);
+  const ballColB = () => eff.magnet > 0 ? '#d4b8ff' : (W8().colors ? W8().colors[1] : BALL_COLOR_B);
   function drawBall() {
+    const wp = W8();
+    if (wp.glow && CFG.fx > 0) { // 属性ボール：光のオーラ
+      const g = ctx.createRadialGradient(ball.x, ball.y, ball.r * 0.5, ball.x, ball.y, ball.r * 3.2);
+      g.addColorStop(0, `rgba(${wp.glow},0.55)`); g.addColorStop(1, `rgba(${wp.glow},0)`);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r * 3.2, 0, Math.PI * 2); ctx.fill();
+      if (weapon === 'thunder' && Math.random() < 0.5) { // 稲妻
+        ctx.strokeStyle = 'rgba(255,250,200,0.9)'; ctx.lineWidth = 1.2; ctx.beginPath();
+        let a = Math.random() * 6.28, px = ball.x + Math.cos(a) * ball.r, py = ball.y + Math.sin(a) * ball.r; ctx.moveTo(px, py);
+        for (let k = 0; k < 3; k++) { px += Math.cos(a) * ball.r * 0.9 + (Math.random() - 0.5) * ball.r * 1.4; py += Math.sin(a) * ball.r * 0.9 + (Math.random() - 0.5) * ball.r * 1.4; ctx.lineTo(px, py); }
+        ctx.stroke();
+      }
+      if (weapon === 'ice') { // 氷の結晶
+        ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 1; ctx.beginPath();
+        for (let k = 0; k < 3; k++) { const a = ball.rot * 0.3 + k * Math.PI / 3; ctx.moveTo(ball.x - Math.cos(a) * ball.r * 1.8, ball.y - Math.sin(a) * ball.r * 1.8); ctx.lineTo(ball.x + Math.cos(a) * ball.r * 1.8, ball.y + Math.sin(a) * ball.r * 1.8); }
+        ctx.stroke();
+      }
+    }
+    if (weapon === 'spin' && CFG.fx > 0) { // スピン：回転の残像の輪
+      ctx.strokeStyle = 'rgba(255,122,224,0.5)'; ctx.lineWidth = 2;
+      for (let k = 0; k < 2; k++) { ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r * 1.7, ball.rot + k * Math.PI, ball.rot + k * Math.PI + 1.6); ctx.stroke(); }
+    }
+    if (weapon === 'big') { ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r + 2, 0, Math.PI * 2); ctx.stroke(); }
+    if (weapon === 'control') { ctx.strokeStyle = 'rgba(61,255,181,0.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r * 1.6, Math.PI - 0.5, Math.PI + 0.5); ctx.moveTo(ball.x + ball.r * 1.6 * Math.cos(-0.5), ball.y + ball.r * 1.6 * Math.sin(-0.5)); ctx.arc(ball.x, ball.y, ball.r * 1.6, -0.5, 0.5); ctx.stroke(); }
     if (eff.power > 0 || eff.poison > 0) {
       ctx.fillStyle = eff.poison > 0 ? 'rgba(124,255,58,0.35)' : 'rgba(255,77,109,0.35)';
       ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r * 1.9, 0, Math.PI * 2); ctx.fill();
@@ -4181,6 +4294,38 @@
     const w = W * CFG.paddleW * objK() * WIDE_MULT[eff.wide > 0 ? eff.wideLv : 0] * (1 + 0.15 * upN('wide'));
     const h = Math.max(4, paddle.h * 0.6);
     return { x: Math.max(-w / 2 + 10, Math.min(W + w / 2 - 10, paddle.x)), y: H - safeBottom * 0.62, w, h };
+  }
+  // ---- 画面一番下の武器の並び：パドルを下まで降ろして触れると、そのボールに切り替わる ----
+  const slotY = () => H - safeBottom * 0.28;
+  function slotList() {
+    const list = WEAPON_ORDER.filter(w => owned.has(w));
+    const n = list.length, sw = Math.min(W / Math.max(n, 1), 60);
+    return list.map((w, i) => ({ w, x: W / 2 + (i - (n - 1) / 2) * sw, sw }));
+  }
+  const paddleMaxY = () => owned.size > 1 ? slotY() - paddle.h * 0.5 : paddle.baseY;
+  let lastSlot = null;
+  function checkSlotGrab() {
+    if (owned.size < 2 || (state !== 'play' && state !== 'ready')) { lastSlot = null; return; }
+    if (paddle.y + paddle.h < slotY() - 4) { lastSlot = null; return; }
+    for (const sl of slotList()) {
+      if (Math.abs(paddle.x - sl.x) < sl.sw / 2) {
+        if (lastSlot !== sl.w && sl.w !== weapon) setWeapon(sl.w);
+        lastSlot = sl.w; return;
+      }
+    }
+    lastSlot = null;
+  }
+  function drawWeaponSlots() {
+    if (owned.size < 2) return;
+    const y = slotY(), sz = Math.min(26, safeBottom * 0.42);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, y - sz * 0.75, W, sz * 1.5);
+    for (const sl of slotList()) {
+      const it = ITEMS.find(x => x.weapon === sl.w), on = sl.w === weapon;
+      if (on) { ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sl.x, y, sz * 0.68, 0, Math.PI * 2); ctx.stroke(); }
+      ctx.globalAlpha = on ? 1 : 0.7;
+      if (it) ctx.drawImage(itemSprite(it), sl.x - sz / 2, y - sz / 2, sz, sz);
+      ctx.globalAlpha = 1;
+    }
   }
   function drawHelpPaddle() {
     if (!eff.help) return;
@@ -4339,6 +4484,24 @@
       g.beginPath(); for (const [x, y] of P) { g.moveTo(m, m); g.lineTo(x, y); } g.stroke();
       g.beginPath(); P.forEach(([x, y], i) => { const xx = m + (x - m) * 0.5, yy = m + (y - m) * 0.5; i ? g.lineTo(xx, yy) : g.moveTo(xx, yy); }); g.closePath(); g.stroke();
       shine(m - 10, m - 12, 6);
+    } else if (it.weapon && it.weapon !== 'laser') { // ボールの種類：色分けしたボール＋それぞれの印
+      const wp = WEAPONS[it.weapon], [ca, cb] = wp.colors || [BALL_COLOR_A, BALL_COLOR_B], R = it.weapon === 'big' ? 28 : 22;
+      if (wp.glow) { const gl = g.createRadialGradient(m, m, R * 0.6, m, m, 32); gl.addColorStop(0, `rgba(${wp.glow},0.6)`); gl.addColorStop(1, `rgba(${wp.glow},0)`); g.fillStyle = gl; g.fillRect(0, 0, S, S); }
+      g.beginPath(); g.arc(m, m, R, 0, Math.PI * 2); g.fillStyle = ca; g.fill();
+      g.beginPath(); g.arc(m, m, R, -Math.PI / 2, Math.PI / 2); g.fillStyle = cb; g.fill();
+      g.beginPath(); g.arc(m, m, R, 0, Math.PI * 2); out(3);
+      g.save(); g.translate(m, m); g.lineWidth = 3; g.strokeStyle = '#ffffff'; g.fillStyle = '#ffffff';
+      const sym = it.weapon;
+      if (sym === 'normal') { g.font = '900 22px -apple-system, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineWidth = 4; g.strokeStyle = '#0a0c19'; g.strokeText('N', 0, 1); g.fillText('N', 0, 1); }
+      else if (sym === 'spin') { g.beginPath(); for (let a = 0; a < Math.PI * 4; a += 0.2) { const r = 2 + a * 1.4; g.lineTo(Math.cos(a) * r, Math.sin(a) * r); } g.strokeStyle = '#0a0c19'; g.lineWidth = 5; g.stroke(); g.strokeStyle = '#fff'; g.lineWidth = 2.5; g.stroke(); }
+      else if (sym === 'big') { g.font = '900 16px -apple-system, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineWidth = 4; g.strokeStyle = '#0a0c19'; g.strokeText('BIG', 0, 1); g.fillText('BIG', 0, 1); }
+      else if (sym === 'control') { for (const d of [-1, 1]) { g.beginPath(); g.moveTo(d * 4, -8); g.lineTo(d * 14, 0); g.lineTo(d * 4, 8); g.closePath(); g.fillStyle = '#0a0c19'; g.fill(); g.beginPath(); g.moveTo(d * 5, -6); g.lineTo(d * 12, 0); g.lineTo(d * 5, 6); g.closePath(); g.fillStyle = '#fff'; g.fill(); } }
+      else if (sym === 'fire') { g.beginPath(); g.moveTo(0, -15); g.bezierCurveTo(10, -4, 11, 6, 0, 13); g.bezierCurveTo(-11, 6, -10, -4, -3, -6); g.bezierCurveTo(-2, -1, 2, 0, 0, -15); g.fillStyle = '#fff3c4'; g.fill(); g.strokeStyle = '#0a0c19'; g.lineWidth = 2; g.stroke(); }
+      else if (sym === 'ice') { g.strokeStyle = '#0a0c19'; g.lineWidth = 5; for (let k = 0; k < 3; k++) { const a = k * Math.PI / 3; g.beginPath(); g.moveTo(-Math.cos(a) * 14, -Math.sin(a) * 14); g.lineTo(Math.cos(a) * 14, Math.sin(a) * 14); g.stroke(); } g.strokeStyle = '#ffffff'; g.lineWidth = 2.5; for (let k = 0; k < 3; k++) { const a = k * Math.PI / 3; g.beginPath(); g.moveTo(-Math.cos(a) * 14, -Math.sin(a) * 14); g.lineTo(Math.cos(a) * 14, Math.sin(a) * 14); g.stroke(); } }
+      else if (sym === 'thunder') { g.beginPath(); g.moveTo(3, -16); g.lineTo(-8, 2); g.lineTo(0, 2); g.lineTo(-3, 16); g.lineTo(9, -3); g.lineTo(1, -3); g.closePath(); g.fillStyle = '#ffffff'; g.fill(); g.strokeStyle = '#0a0c19'; g.lineWidth = 2; g.stroke(); }
+      else if (sym === 'poison') { g.beginPath(); g.arc(0, -3, 9, 0, Math.PI * 2); g.fillStyle = '#fff'; g.fill(); g.strokeStyle = '#0a0c19'; g.lineWidth = 2; g.stroke(); g.fillStyle = '#0a0c19'; g.beginPath(); g.arc(-3.5, -4, 2.5, 0, 7); g.arc(3.5, -4, 2.5, 0, 7); g.fill(); g.fillStyle = '#fff'; g.fillRect(-5, 5, 10, 6); g.strokeRect(-5, 5, 10, 6); }
+      g.restore();
+      shine(m - R * 0.45, m - R * 0.5, R * 0.22);
     } else if (it.mult) { // ボール＋数字
       g.beginPath(); g.arc(m, m, 27, 0, Math.PI * 2); g.fillStyle = BALL_COLOR_A; g.fill();
       g.beginPath(); g.arc(m, m, 27, -Math.PI / 2, Math.PI / 2); g.fillStyle = BALL_COLOR_B; g.fill();
@@ -4480,6 +4643,7 @@
     if (eff.help > 0) chips.push(['HELP', 0, '#7cffcb']);
     if (eff.hs > 0) chips.push([`SPEED+${eff.hs}`, 0, '#ff9e40']);
     if (eff.laser > 0) chips.push(['LASER', 0, eff.magnet > 0 ? '#b388ff' : '#ff3b3b']);
+    else if (weapon !== 'normal') chips.push([WEAPONS[weapon].name, 0, (WEAPONS[weapon].colors || ['#ffb74d'])[1]]);
     if (eff.ghost > 0) chips.push(['GHOST', eff.ghost, '#9aa0b8']);
     if (balls.length > 1) chips.push([`●×${balls.length}`, 0, '#ffffff']);
     ctx.font = 'bold 10px -apple-system, sans-serif';
@@ -4667,6 +4831,7 @@
       ctx.strokeStyle = `rgba(212,184,255,${0.35 * ph})`; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(paddle.x, py, R * (1 - ph), 0, Math.PI * 2); ctx.stroke(); // 内側へ縮む輪
     }
+    drawWeaponSlots();
     drawHelpPaddle();
     drawPaddle();
 
@@ -5330,7 +5495,7 @@
     return {
       balls: packBalls(), px: paddle.x, py: paddle.y, pw: paddle.w,
       br: bricks.map(b => [b.alive, b.hp, b.reviveT, b.revived]),
-      score, lives, state, rally, chain, stageTime, windT, bossDone, combo, comboT, brickScroll, scrollPause, brickTotal,
+      score, lives, state, rally, chain, stageTime, windT, bossDone, combo, comboT, brickScroll, scrollPause, brickTotal, weapon, owned: [...owned],
       items: items.map(i => ({ ...i })), eff: { ...eff }, fever, feverGauge,
       boss: boss ? { ...boss } : null, shots: shots.map(x => ({ ...x })),
     };
@@ -5349,7 +5514,7 @@
     aliveCount = bricks.reduce((n, b) => n + (b.alive && countable(b) ? 1 : 0), 0);
     if (sn.brickTotal) brickTotal = sn.brickTotal;
     ({ score, lives, state, rally, chain, stageTime, windT, bossDone, fever, feverGauge } = sn);
-    combo = sn.combo || 0; comboT = sn.comboT || 0; brickScroll = sn.brickScroll || 0; scrollPause = sn.scrollPause || 0;
+    combo = sn.combo || 0; comboT = sn.comboT || 0; weapon = sn.weapon || 'normal'; owned = new Set(sn.owned || []); brickScroll = sn.brickScroll || 0; scrollPause = sn.scrollPause || 0;
     items = sn.items.map(i => ({ ...i }));
     Object.assign(eff, sn.eff);
     boss = sn.boss ? { ...sn.boss } : null;
