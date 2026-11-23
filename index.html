@@ -73,6 +73,8 @@
   #rankList li .nm { width: 6.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .optCheck { display: flex; align-items: center; justify-content: space-between; }
   .optCheck input { width: 22px; height: 22px; }
+  #quitBtn { position: fixed; left: 50%; top: calc(66% + 64px); transform: translateX(-50%); z-index: 30; padding: 10px 22px; border-radius: 999px; border: 1.5px solid rgba(255,255,255,0.45); background: rgba(20,22,45,0.85); color: #e8ecff; font: 700 14px -apple-system, "Hiragino Sans", sans-serif; touch-action: manipulation; white-space: nowrap; }
+  #quitBtn.warn { border-color: #ff6b6b; color: #ff9b9b; }
   #manualBtn { position: fixed; left: 50%; top: 66%; transform: translateX(-50%); z-index: 30; padding: 12px 26px; border-radius: 999px; border: 2px solid #ffd23f; background: rgba(20,22,45,0.9); color: #ffd23f; font: 800 16px -apple-system, "Hiragino Sans", sans-serif; touch-action: manipulation; }
   #manualUI { position: fixed; inset: 0; z-index: 46; background: rgba(6,8,20,0.96); display: flex; flex-direction: column; }
   #manualUI .mHead { display: flex; align-items: center; justify-content: space-between; padding: calc(env(safe-area-inset-top) + 12px) 16px 10px; border-bottom: 1px solid rgba(255,255,255,0.12); }
@@ -185,7 +187,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.26</div>
+    <div id="ver">ver 0.0.27</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -220,6 +222,7 @@
     </div>
   </div>
   <button id="manualBtn" class="hidden">📖 遊び方</button>
+  <button id="quitBtn" class="hidden">タイトルへ</button>
   <div id="manualUI" class="hidden">
     <div class="mHead"><b>遊び方マニュアル</b></div>
     <div class="mTabs" id="manualTabs"></div>
@@ -639,7 +642,7 @@
     { key: 'beamSpeed',  label: 'ビーム発生速度', min: 0.2, max: 2.5, step: 0.05 },
     { key: 'maxBalls',   label: 'ボールの上限', min: 16, max: 1024, step: 16 },
     { key: 'laserMax',   label: 'レーザーの上限', min: 16, max: 128, step: 8 },
-    { key: 'startLives', label: '残機（次のゲームから）', min: 1, max: 99, step: 1 },
+    { key: 'startLives', label: '残機（次のゲームから）', min: 1, max: 8, step: 1 },
     { key: 'sensX',      label: '横の感度',     min: 0.5, max: 3, step: 0.1 },
     { key: 'sensY',      label: '縦の感度',     min: 0.5, max: 3, step: 0.1 },
     { key: 'paddleW',    label: 'パドル幅',     min: 0.1, max: 0.6, step: 0.01 },
@@ -1821,6 +1824,7 @@
   // ブロックの初期値を1/8→1/4に変更
   if (!(CFG.cfgVer >= 7)) { if (CFG.brickScale === 0.125) CFG.brickScale = DEFAULTS.brickScale; CFG.cfgVer = 7; }
   // 速度の初期値を 初速0.3→0.1・最高1.8→0.8・ビーム1.0→0.6 に変更（旧初期値のままなら新しい値に）
+  if (CFG.startLives > 8) CFG.startLives = 8; // 残機の上限は8
   if (!(CFG.cfgVer >= 8)) {
     if (CFG.speed === 0.3) CFG.speed = DEFAULTS.speed;
     if (CFG.maxSpeed === 1.8) CFG.maxSpeed = DEFAULTS.maxSpeed;
@@ -2336,7 +2340,7 @@
 
   function newGame(startStage) {
     askMotion();
-    score = 0; lives = Math.round(CFG.startLives) || LIVES; bestRally = 0; scoreSaved = false;
+    score = 0; lives = Math.min(8, Math.round(CFG.startLives) || LIVES); bestRally = 0; scoreSaved = false;
     up = {}; combo = 0; comboT = 0; bestCombo = 0; hitStop = 0; hiAtStart = hiScore();
     rankedRun = isDefaultPlay() && (startStage || 1) === 1;
     setTitle(false);
@@ -3380,7 +3384,7 @@
       useBall(balls[0]);
     }
     if (it.mult) multiplyBalls(it.mult);
-    if (it.id === 'oneup') { lives = Math.min(99, lives + 1); SFX.oneUp(); }
+    if (it.id === 'oneup') gainLife(it.x);
     else if (it.id === 'ghost') SFX.ghost();
     else SFX.item();
     addPopup(it.x, paddle.y - 24, it.label === '1UP' ? '1UP!' : it.label, it.color);
@@ -4934,7 +4938,31 @@
   function updateManualBtn() {
     const show = paused && !panelOpen && manualUI.classList.contains('hidden') && (state === 'play' || state === 'ready');
     manualBtn.classList.toggle('hidden', !show);
+    quitBtn.classList.toggle('hidden', !show);
+    if (!show) resetQuit();
   }
+  // ポーズ中の「タイトルへ」：もう一度タップで確定。そこまでのスコアで結果画面（ランキング送信可）→タイトル
+  const quitBtn = document.getElementById('quitBtn');
+  let quitArmT = 0, quitting = false;
+  function resetQuit() { quitArmT = 0; quitBtn.textContent = 'タイトルへ'; quitBtn.classList.remove('warn'); }
+  quitBtn.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+  quitBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (performance.now() > quitArmT) { // 1回目：確認
+      quitArmT = performance.now() + 3000;
+      quitBtn.textContent = 'ここまでのスコアで終了？ もう一度タップ';
+      quitBtn.classList.add('warn');
+      setTimeout(() => { if (performance.now() > quitArmT) resetQuit(); }, 3100);
+      return;
+    }
+    resetQuit();
+    quitting = true;
+    pausedByPanel = false; setPaused(false);
+    rewinding = false;
+    SFX.music.stop();
+    state = 'over';
+    openResult();
+  });
   manualBtn.addEventListener('click', e => { e.stopPropagation(); renderManual(); manualUI.classList.remove('hidden'); updateManualBtn(); });
   document.getElementById('manualClose').addEventListener('click', () => { manualUI.classList.add('hidden'); updateManualBtn(); }); // ポーズ画面に戻る
   manualBtn.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
@@ -5065,11 +5093,21 @@
   const resultUI = document.getElementById('resultUI'), resNote = document.getElementById('resNote');
   const resForm = document.getElementById('resForm'), resOk = document.getElementById('resOk');
   const nameInput = document.getElementById('nameInput'), sendBtn = document.getElementById('sendBtn'), skipBtn = document.getElementById('skipBtn');
+  // 残機は最大8。8の時に増えたらスコアボーナスに
+  const LIVES_MAX = 8;
+  function gainLife(x) {
+    if (lives < LIVES_MAX) { lives++; SFX.oneUp(); return; }
+    const bonus = Math.ceil(50000 * stage * scoreMult());
+    score += bonus;
+    addPopup(W / 2, paddle.y - 50, `MAX LIFE  +${bonus.toLocaleString()}`, '#ff8fb1', 20);
+    SFX.perfect();
+  }
   function openResult() {
     if (!scoreSaved) saveScore();
     const cleared = state === 'allClear';
     state = 'result';
-    document.getElementById('resTitle').textContent = cleared ? 'ALL CLEAR!!' : 'GAME OVER';
+    document.getElementById('resTitle').textContent = cleared ? 'ALL CLEAR!!' : quitting ? 'RESULT' : 'GAME OVER';
+    quitting = false;
     document.getElementById('resScore').innerHTML = `SCORE <b>${score}</b><br>STAGE ${stage}・最高 ${bestRally} ラリー・最大 ${bestCombo} コンボ`;
     showGap(score);
     resNote.textContent = '';
@@ -5093,7 +5131,7 @@
   const upUI = document.getElementById('upUI'), upCards = document.getElementById('upCards'), upHave = document.getElementById('upHave');
   function openUpgrade() {
     state = 'upgrade';
-    const pool = UPGRADES.filter(u => !(u.once && upN(u.id)) && !(u.id === 'life' && lives >= 99));
+    const pool = UPGRADES.filter(u => !(u.once && upN(u.id)) && !(u.id === 'life' && lives >= LIVES_MAX));
     const pick = [];
     while (pick.length < 3 && pool.length) pick.push(pool.splice(Math.random() * pool.length | 0, 1)[0]);
     upCards.innerHTML = '';
@@ -5112,7 +5150,7 @@
   function chooseUpgrade(u) {
     if (state !== 'upgrade') return;
     up[u.id] = upN(u.id) + 1;
-    if (u.id === 'life') { lives = Math.min(99, lives + 1); SFX.oneUp(); } else SFX.item();
+    if (u.id === 'life') gainLife(W / 2); else SFX.item();
     upUI.classList.add('hidden');
     loadStage(stage + 1);
   }
