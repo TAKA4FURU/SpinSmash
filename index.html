@@ -187,7 +187,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.28</div>
+    <div id="ver">ver 0.0.29</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -266,6 +266,11 @@
       <div class="btns"><button id="bossBtn">ボス戦へ</button></div>
       <div class="lab" style="margin-bottom:4px">ステージへ移動</div>
       <div class="stageBtns" id="stageBtns"></div>
+      <div class="lab" style="margin:10px 0 4px">画面内のボール数 <span id="tBallVal">オフ</span></div>
+      <input type="range" id="tBallNum" min="0" max="128" step="1" value="0" style="width:100%">
+      <div class="lab" style="margin:10px 0 4px">ボール</div>
+      <div class="stageBtns" id="tWeaponBtns"></div>
+      <div class="btns" style="margin-top:10px"><button id="tNoItem">アイテムの効果：あり</button></div>
     </div>
     <div id="soundBox"></div>
     <div class="meter">
@@ -2655,6 +2660,7 @@
     if (itemTipT > 0) itemTipT -= dt;
     if (hitStopCool > 0) hitStopCool -= dt;
     elemParticles(dt);
+    keepTestBalls();
     if (comboT > 0 && state === 'play') { comboT -= dt; if (comboT <= 0) endCombo(); }
     if (shakeT > 0) shakeT -= dt;
     if (shakeCool > 0) shakeCool -= dt;
@@ -3443,6 +3449,7 @@
     if (eff.wide <= 0) eff.wideLv = 0;
   }
   function applyItem(it) {
+    if (testNoItems) return; // テスト用：アイテムを取っても何も起きない
     if (it.gem) { // 宝石：スコアだけ
       const v = Math.ceil(it.gem * stage * scoreMult());
       score += v;
@@ -5442,6 +5449,38 @@
       pausedByPanel = false; setPanel(false); setPaused(false);
     });
     stageBtns.appendChild(b);
+  }
+
+  // テスト用：ボールの数を保つ・ボールの種類・アイテムの効果なし（軌道テスト用。使うとランキング対象外）
+  let testBalls = 0, testNoItems = false;
+  {
+    const num = document.getElementById('tBallNum'), val = document.getElementById('tBallVal');
+    num.addEventListener('input', () => { testBalls = +num.value; val.textContent = testBalls ? `${testBalls}個（上限：${ballCap()}）` : 'オフ'; if (testBalls) rankedRun = false; });
+    const wb = document.getElementById('tWeaponBtns'), wbtns = [];
+    for (const w of WEAPON_ORDER) {
+      const b = document.createElement('button'); b.textContent = WEAPONS[w].name; b.style.minWidth = '72px';
+      b.addEventListener('click', () => {
+        if (state === 'title') return;
+        rankedRun = false; setWeapon(w, true);
+        wbtns.forEach(x => x.classList.toggle('on', x === b));
+        if (testBalls) val.textContent = `${testBalls}個（上限：${ballCap()}）`;
+      });
+      wbtns.push(b); wb.appendChild(b);
+    }
+    const ni = document.getElementById('tNoItem');
+    ni.addEventListener('click', () => { testNoItems = !testNoItems; ni.textContent = `アイテムの効果：${testNoItems ? 'なし' : 'あり'}`; ni.classList.toggle('on', testNoItems); if (testNoItems) rankedRun = false; });
+  }
+  // 指定した数を常に保つ（減ったら今あるボールから分けて補充、多ければ減らす）
+  function keepTestBalls() {
+    if (!testBalls || state !== 'play') return;
+    const live = balls.filter(b => !b.dead), want = Math.min(testBalls, ballCap());
+    if (!live.length) return;
+    if (live.length > want) { balls = live.slice(0, want); useBall(balls[0]); return; }
+    for (let i = live.length; i < want; i++) {
+      const src = live[i % live.length], sp = Math.max(Math.hypot(src.vx, src.vy), H * CFG.speed);
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.6;
+      balls.push({ ...src, trail: [], stuck: null, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, dead: false, selfHit: false });
+    }
   }
 
   // アプリ切替などで非表示になったら自動ポーズ
