@@ -187,7 +187,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.30</div>
+    <div id="ver">ver 0.0.31</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -2436,6 +2436,7 @@
       pausedByPanel = false; setPaused(false); startDrag(e); return;
     }
     if (paused || state === 'title' || state === 'stageClear' || state === 'upgrade') return;
+    if (trayTap(e)) return; // 画面下の並び：アイコンをタップで切り替え（帯の中ではパドル操作しない）
     startDrag(e); // 指が増えても、今の位置から続けて動かせるよう基準を取り直す
     fingers = countFingers(e);
     fingerDown = true;
@@ -2639,7 +2640,6 @@
     for (const b of bricks) if (b.hitT > 0) b.hitT = Math.max(0, b.hitT - dt * 8);
     paddleGlow *= Math.exp(-dt * 7);
     helpGlow *= Math.exp(-dt * 7);
-    checkSlotGrab();
     rallyPop *= Math.exp(-dt * 6);
     for (const p of particles) {
       p.vy += H * (p.glow ? 0.3 : 1.6) * dt;
@@ -3412,7 +3412,8 @@
   const WIDE_MULT = [1, 1.5, 2, 2.5]; // WIDEを重ねて取ると3段階まで広がる // アイテム・毒の効果時間
   function dropItem(b) {
     // ボールが上限なら、増えるアイテムは出さない
-    const pool = balls.length >= ballCap() ? ITEMS.filter(x => !x.mult) : ITEMS;
+    // ボールの種類・属性のアイテムは、もう持っている（画面下に並んでいる）ものは出さない
+    const pool = ITEMS.filter(x => !(balls.length >= ballCap() && x.mult) && !(x.weapon && (owned.has(x.weapon) || (x.weapon === 'normal' && weapon === 'normal' && !element))));
     let r = Math.random() * pool.reduce((a, it) => a + it.w, 0), it = pool[0];
     for (const x of pool) { r -= x.w; if (r <= 0) { it = x; break; } }
     items.push({ ...it, x: b.x + b.w / 2, y: b.y + b.h / 2, vy: H * 0.22 });
@@ -4328,22 +4329,23 @@
     return out;
   }
   let slotDivX = null;
-  const paddleMaxY = () => owned.size > 1 ? slotY() - paddle.h * 0.5 : paddle.baseY;
-  let lastSlot = null;
-  function checkSlotGrab() {
-    if (owned.size < 2 || (state !== 'play' && state !== 'ready')) { lastSlot = null; return; }
-    if (paddle.y + paddle.h < slotY() - 4) { lastSlot = null; return; }
-    for (const sl of slotList()) {
-      if (Math.abs(paddle.x - sl.x) < sl.sw / 2) {
-        if (lastSlot !== sl.w && sl.w !== weapon && sl.w !== element) setWeapon(sl.w);
-        lastSlot = sl.w; return;
-      }
-    }
-    lastSlot = null;
+  const paddleMaxY = () => paddle.baseY;
+  const slotSize = () => Math.min(30, safeBottom * 0.5);
+  // 画面下の帯をタップした時：触れたアイコンに切り替え。帯の中のタッチはパドル操作に使わない
+  function trayTap(e) {
+    if (owned.size < 2 || (state !== 'play' && state !== 'ready')) return false;
+    const t = e.changedTouches ? e.changedTouches[0] : e;
+    if (!t || t.clientY == null) return false;
+    const x = t.clientX - cv.getBoundingClientRect().left, y = t.clientY;
+    if (y < slotY() - slotSize() * 0.9) return false;
+    let best = null, bd = 1e9;
+    for (const sl of slotList()) { const d = Math.abs(x - sl.x); if (d < sl.sw * 0.6 && d < bd) { bd = d; best = sl; } }
+    if (best && best.w !== weapon && best.w !== element) setWeapon(best.w);
+    return true;
   }
   function drawWeaponSlots() {
     if (owned.size < 2) return;
-    const y = slotY(), sz = Math.min(26, safeBottom * 0.42);
+    const y = slotY(), sz = slotSize();
     ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, y - sz * 0.75, W, sz * 1.5);
     slotList();
     if (slotDivX != null) { ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(slotDivX - 1, y - sz * 0.55, 2, sz * 1.1); } // 種類｜属性 の区切り
