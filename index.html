@@ -187,7 +187,7 @@
     <button id="startBtn">スタート</button>
     <button id="rankBtn" class="sub">ランキング</button>
     <button id="optBtn" class="sub">オプション</button>
-    <div id="ver">ver 0.0.29</div>
+    <div id="ver">ver 0.0.30</div>
   </div>
   <div id="optUI" class="hidden">
     <div class="rankBox optBox">
@@ -2298,7 +2298,7 @@
     trail = ball.trail;
     eff.magnet = 0; // マグネットはミスで解除
     eff.laser = 0;  // レーザーもミスで解除
-    weapon = 'normal'; owned = new Set(); // ボールの種類も、画面下の武器も全部なくなる
+    weapon = 'normal'; element = null; owned = new Set(); // ボールの種類も属性も、画面下の武器も全部なくなる
     eff.help = 0;   // ヘルプパドルも
     eff.hs = 0;     // ハイスピードも
     ball.r = ballR();
@@ -2820,12 +2820,10 @@
     if (ball.stuck == null && (weapon === 'spin' || weapon === 'control')) {
       const sp0 = speedOf();
       if (sp0 > 0) {
-        if (weapon === 'spin') { // らせん：進む向きに対して横に揺れながら進む（カーブはしない）
-          ball.spin = 0; ball.ph = (ball.ph || Math.random() * 6) + dt * 11;
-          const a = H * 2.4 * Math.cos(ball.ph) * dt;
-          ball.vx += -ball.vy / sp0 * a; ball.vy += ball.vx / sp0 * a;
-        } else ball.vx += tiltX * H * 1.6 * dt; // コントロール：iPhoneの左右の傾きで曲がる
-        setSpeed(sp0);
+        if (weapon === 'spin') { // 渦巻き：進む速さの上限は通常の半分（ループは位置の動きで足す）
+          ball.spin = 0;
+          setSpeed(Math.min(sp0, maxSp() * 0.5));
+        } else { ball.vx += tiltX * H * 1.6 * dt; setSpeed(sp0); } // コントロール：iPhoneの左右の傾きで曲がる
       }
     }
     const vx0 = ball.vx, vy0 = ball.vy;
@@ -2841,10 +2839,16 @@
       ball.extra = ne < H * 0.002 ? 0 : ne;
     }
     clampSpin();
-    ball.rot += (weapon === 'spin' ? 45 * Math.sign(Math.cos(ball.ph || 0) || 1) : ball.spin / ball.r) * dt;
+    ball.rot += (weapon === 'spin' ? 40 : ball.spin / ball.r) * dt;
 
     ball.x += ball.vx * dt;
     ball.y += ball.vy * dt;
+    if (weapon === 'spin' && ball.stuck == null) { // 渦巻き：直径＝画面幅の約1/8の輪を描きながら前へ（ループ状の軌跡）
+      const R = W / 16, sp = Math.max(speedOf(), H * 0.05), om = Math.max(6, 2.8 * sp / R);
+      ball.ph = (ball.ph || Math.random() * 6) + om * dt;
+      ball.x += -Math.sin(ball.ph) * R * om * dt;
+      ball.y += Math.cos(ball.ph) * R * om * dt;
+    }
     recordTrail();
 
     // 壁
@@ -3062,7 +3066,8 @@
   }
   // 属性ボールの粒（火の粉・冷気・電気・毒の泡）。重くならないよう1フレームに数個だけ
   function elemParticles(dt) {
-    const wp = W8(); if (!wp.glow || CFG.fx <= 0 || state !== 'play') return;
+    const wp = E8(); if (!wp || !wp.glow || CFG.fx <= 0 || state !== 'play') return;
+    const weapon = element; // 下の色分けは属性で
     const n = Math.min(balls.length, 6);
     for (let i = 0; i < n && particles.length < 170; i++) {
       const b = balls[Math.random() * balls.length | 0]; if (!b || b.dead) continue;
@@ -3291,14 +3296,14 @@
     ghost: '透明：ハズレ。しばらくパドルが見えなくなる（窓だけ見える）',
     hispeed: 'HI-SPEED：お邪魔アイテム！取るたびにボールが速くなる（最大3.0）。威力は上がらない。次のミスまで',
     help: 'HELP：画面の一番下にヘルプパドルが出て、自分のパドルと一緒に左右に動く。WIDEで一緒に広がる。次のミスまで',
-    normalball: 'NORMAL BALL：普通のボールに戻す（64個まで）',
-    spinball: 'SPINNING BALL：いつも高速スピンして、らせんを描きながら進む。貫通はしない。32個まで',
+    normalball: 'NORMAL BALL：ボールの種類も属性も普通に戻す（64個まで）',
+    spinball: 'SPINNING BALL：グルグル輪を描く渦巻きの動きで進む（速さは通常の半分まで）。貫通はしない。32個まで',
     bigball: 'BIG BALL：3倍の大きさで威力5倍！8個まで',
     ctrlball: 'CONTROL BALL：iPhoneを左右に傾けるとボールが曲がる。振ると壁に当てなくても高速スピン。64個まで',
-    fireball: 'FIRE BALL：燃えるボール。くさのステージに1.3倍、ほのおのステージには0.25倍',
-    iceball: 'ICE BALL：凍ったボール。ほのおのステージに1.3倍、こおりのステージには0.25倍',
-    thunderball: 'THUNDER BALL：稲妻のボール。みず・はがねのステージに1.3倍、いわのステージには0.25倍',
-    poisonball: 'POISON BALL：毒のボール。せいぶつのステージに1.3倍、どくのステージには0.25倍',
+    fireball: 'FIRE（属性）：燃えるボール。くさのステージに1.3倍、ほのおのステージには0.25倍。ボールの種類と組み合わせられる',
+    iceball: 'ICE（属性）：凍ったボール。ほのおのステージに1.3倍、こおりのステージには0.25倍。ボールの種類と組み合わせられる',
+    thunderball: 'THUNDER（属性）：稲妻のボール。みず・はがねのステージに1.3倍、いわのステージには0.25倍。ボールの種類と組み合わせられる',
+    poisonball: 'POISON（属性）：毒のボール。せいぶつのステージに1.3倍、どくのステージには0.25倍。ボールの種類と組み合わせられる',
     laser: 'LASER：ボールが小さく強い光のレーザーに！曲がらずまっすぐ高速。普段は壊せない水晶ブロックも壊せる。32個まで',
     gem1: 'コインとダイヤ：取るとスコア。銅1K・銀5K・金20Kのコイン、六角形のダイヤは超高得点！',
   };
@@ -3363,19 +3368,24 @@
     spin:    { name: 'SPINNING', cap: () => 32, r: 1, colors: ['#ff7ae0', '#7df9ff'] },
     big:     { name: 'BIG',     cap: () => 8, r: 3, dmg: 5 },
     control: { name: 'CONTROL', cap: () => CFG.maxBalls, r: 1, colors: ['#2a8cff', '#3dffb5'] },
-    fire:    { name: 'FIRE',    cap: () => CFG.maxBalls, r: 1, colors: ['#ff4a12', '#ffc23d'], elem: { grass: 1.3, fire: 0.25 }, glow: '255,110,30' },
-    ice:     { name: 'ICE',     cap: () => CFG.maxBalls, r: 1, colors: ['#5fd3ff', '#f2fdff'], elem: { fire: 1.3, ice: 0.25 }, glow: '140,230,255' },
-    thunder: { name: 'THUNDER', cap: () => CFG.maxBalls, r: 1, colors: ['#ffd400', '#fff8c4'], elem: { water: 1.3, steel: 1.3, rock: 0.25 }, glow: '255,230,60' },
-    poison:  { name: 'POISON',  cap: () => CFG.maxBalls, r: 1, colors: ['#7cff3a', '#a64dff'], elem: { bio: 1.3, poison: 0.25 }, glow: '150,255,80' },
+    fire:    { isElem: true, name: 'FIRE',    cap: () => CFG.maxBalls, r: 1, colors: ['#ff4a12', '#ffc23d'], elem: { grass: 1.3, fire: 0.25 }, glow: '255,110,30' },
+    ice:     { isElem: true, name: 'ICE',     cap: () => CFG.maxBalls, r: 1, colors: ['#5fd3ff', '#f2fdff'], elem: { fire: 1.3, ice: 0.25 }, glow: '140,230,255' },
+    thunder: { isElem: true, name: 'THUNDER', cap: () => CFG.maxBalls, r: 1, colors: ['#ffd400', '#fff8c4'], elem: { water: 1.3, steel: 1.3, rock: 0.25 }, glow: '255,230,60' },
+    poison:  { isElem: true, name: 'POISON',  cap: () => CFG.maxBalls, r: 1, colors: ['#7cff3a', '#a64dff'], elem: { bio: 1.3, poison: 0.25 }, glow: '150,255,80' },
   };
   const WEAPON_ORDER = ['normal', 'laser', 'spin', 'big', 'control', 'fire', 'ice', 'thunder', 'poison'];
-  let weapon = 'normal', owned = new Set();
+  // weapon＝ボールの種類（NORMAL・LASER・SPINNING・BIG・CONTROL）、element＝属性（FIRE・ICE・THUNDER・POISON・なし）
+  let weapon = 'normal', element = null, owned = new Set();
   const W8 = () => WEAPONS[weapon] || WEAPONS.normal;
+  const E8 = () => element ? WEAPONS[element] : null;
   const ballCap = () => W8().cap();
   function setWeapon(w, silent) {
     if (!WEAPONS[w]) return;
-    const was = weapon;
-    weapon = w; eff.laser = w === 'laser' ? 1 : 0;
+    const was = weapon, wasE = element;
+    if (WEAPONS[w].isElem) element = w;              // 属性だけ変わる（種類はそのまま）
+    else if (w === 'normal') { weapon = 'normal'; element = null; } // NORMAL：種類も属性も元に戻る
+    else weapon = w;                                  // 種類だけ変わる（属性はそのまま）
+    eff.laser = weapon === 'laser' ? 1 : 0;
     if (w !== 'normal') owned.add('normal');
     owned.add(w);
     balls = balls.filter(b => !b.dead).slice(0, Math.max(1, ballCap())); // 上限を超えた分は消える
@@ -3386,13 +3396,14 @@
       if (w === 'laser' && b.stuck == null) { useBall(b); if (speedOf() > 0) setSpeed(Math.max(speedOf(), lt)); }
     }
     useBall(balls[0]);
-    if (!silent && was !== w) {
+    if (!silent && (was !== weapon || wasE !== element)) {
       if (w === 'laser') SFX.laserOn(); else SFX.weaponOn(w);
-      addPopup(W / 2, paddle.y - 40, `${WEAPONS[w].name} BALL`, WEAPONS[w].colors ? WEAPONS[w].colors[1] : (w === 'big' ? '#ffb74d' : '#ffffff'), 20);
+      const nm = (element ? WEAPONS[element].name + ' ' : '') + W8().name;
+      addPopup(W / 2, paddle.y - 40, `${nm} BALL`, WEAPONS[w].colors ? WEAPONS[w].colors[1] : (w === 'big' ? '#ffb74d' : '#ffffff'), 20);
     }
   }
   // 武器ごとの属性ダメージ（ステージの種類で効き目が変わる）
-  const elemMult = () => { const e = W8().elem; return e ? (e[themeOf(stage).key] || 1) : 1; };
+  const elemMult = () => { const e = E8() && E8().elem; return e ? (e[themeOf(stage).key] || 1) : 1; };
   // 今の最高速度：ハイスピード（お邪魔）を取るたびに+0.5、最大3.0（威力は通常の最高速度のまま）
   const HS_STEP = 0.5, HS_MAX = 3.0;
   const maxSp = () => H * Math.min(HS_MAX, Math.max(CFG.maxSpeed, CFG.maxSpeed + HS_STEP * (eff.hs || 0)));
@@ -4059,7 +4070,8 @@
   function drawLasers() {
     const L = H * 0.35, fx = Math.max(0.4, Math.min(CFG.fx, 1.5));
     // 色：通常は赤、マグネット中は紫（ボールと同じルール）
-    const mag = eff.magnet > 0, C = mag ? '140,90,255' : '255,40,40', MID = mag ? '190,150,255' : '255,110,90', CORE = mag ? '240,230,255' : '255,235,225';
+    const mag = eff.magnet > 0, eg = E8() && E8().glow;
+    const C = mag ? '140,90,255' : eg || '255,40,40', MID = mag ? '190,150,255' : eg ? eg : '255,110,90', CORE = mag ? '240,230,255' : '255,235,225'; // 属性付きレーザーは属性の色
     const r = ballR();
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
@@ -4194,21 +4206,22 @@
   }
 
   // マグネット状態のボールは紫の濃淡2色（回転は見えたまま）
-  const ballColA = () => eff.magnet > 0 ? '#7c4dff' : (W8().colors ? W8().colors[0] : BALL_COLOR_A);
-  const ballColB = () => eff.magnet > 0 ? '#d4b8ff' : (W8().colors ? W8().colors[1] : BALL_COLOR_B);
+  const ballCols = () => (E8() && E8().colors) || W8().colors || [BALL_COLOR_A, BALL_COLOR_B]; // 属性の色が優先
+  const ballColA = () => eff.magnet > 0 ? '#7c4dff' : ballCols()[0];
+  const ballColB = () => eff.magnet > 0 ? '#d4b8ff' : ballCols()[1];
   function drawBall() {
-    const wp = W8();
+    const wp = E8() || {};
     if (wp.glow && CFG.fx > 0) { // 属性ボール：光のオーラ
       const g = ctx.createRadialGradient(ball.x, ball.y, ball.r * 0.5, ball.x, ball.y, ball.r * 3.2);
       g.addColorStop(0, `rgba(${wp.glow},0.55)`); g.addColorStop(1, `rgba(${wp.glow},0)`);
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r * 3.2, 0, Math.PI * 2); ctx.fill();
-      if (weapon === 'thunder' && Math.random() < 0.5) { // 稲妻
+      if (element === 'thunder' && Math.random() < 0.5) { // 稲妻
         ctx.strokeStyle = 'rgba(255,250,200,0.9)'; ctx.lineWidth = 1.2; ctx.beginPath();
         let a = Math.random() * 6.28, px = ball.x + Math.cos(a) * ball.r, py = ball.y + Math.sin(a) * ball.r; ctx.moveTo(px, py);
         for (let k = 0; k < 3; k++) { px += Math.cos(a) * ball.r * 0.9 + (Math.random() - 0.5) * ball.r * 1.4; py += Math.sin(a) * ball.r * 0.9 + (Math.random() - 0.5) * ball.r * 1.4; ctx.lineTo(px, py); }
         ctx.stroke();
       }
-      if (weapon === 'ice') { // 氷の結晶
+      if (element === 'ice') { // 氷の結晶
         ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 1; ctx.beginPath();
         for (let k = 0; k < 3; k++) { const a = ball.rot * 0.3 + k * Math.PI / 3; ctx.moveTo(ball.x - Math.cos(a) * ball.r * 1.8, ball.y - Math.sin(a) * ball.r * 1.8); ctx.lineTo(ball.x + Math.cos(a) * ball.r * 1.8, ball.y + Math.sin(a) * ball.r * 1.8); }
         ctx.stroke();
@@ -4304,11 +4317,17 @@
   }
   // ---- 画面一番下の武器の並び：パドルを下まで降ろして触れると、そのボールに切り替わる ----
   const slotY = () => H - safeBottom * 0.28;
+  // 種類｜属性 の順に1列に並べる（間に区切りの分だけすき間）
   function slotList() {
-    const list = WEAPON_ORDER.filter(w => owned.has(w));
-    const n = list.length, sw = Math.min(W / Math.max(n, 1), 60);
-    return list.map((w, i) => ({ w, x: W / 2 + (i - (n - 1) / 2) * sw, sw }));
+    const types = WEAPON_ORDER.filter(w => owned.has(w) && !WEAPONS[w].isElem), elems = WEAPON_ORDER.filter(w => owned.has(w) && WEAPONS[w].isElem);
+    const gap = elems.length ? 0.6 : 0, n = types.length + elems.length + gap, sw = Math.min(W / Math.max(n, 1), 56);
+    const x0 = W / 2 - (n - 1) * sw / 2, out = [];
+    types.forEach((w, i) => out.push({ w, x: x0 + i * sw, sw }));
+    elems.forEach((w, i) => out.push({ w, x: x0 + (types.length + gap + i) * sw, sw }));
+    slotDivX = elems.length ? x0 + (types.length - 0.5 + gap / 2) * sw : null;
+    return out;
   }
+  let slotDivX = null;
   const paddleMaxY = () => owned.size > 1 ? slotY() - paddle.h * 0.5 : paddle.baseY;
   let lastSlot = null;
   function checkSlotGrab() {
@@ -4316,7 +4335,7 @@
     if (paddle.y + paddle.h < slotY() - 4) { lastSlot = null; return; }
     for (const sl of slotList()) {
       if (Math.abs(paddle.x - sl.x) < sl.sw / 2) {
-        if (lastSlot !== sl.w && sl.w !== weapon) setWeapon(sl.w);
+        if (lastSlot !== sl.w && sl.w !== weapon && sl.w !== element) setWeapon(sl.w);
         lastSlot = sl.w; return;
       }
     }
@@ -4326,8 +4345,10 @@
     if (owned.size < 2) return;
     const y = slotY(), sz = Math.min(26, safeBottom * 0.42);
     ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, y - sz * 0.75, W, sz * 1.5);
+    slotList();
+    if (slotDivX != null) { ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(slotDivX - 1, y - sz * 0.55, 2, sz * 1.1); } // 種類｜属性 の区切り
     for (const sl of slotList()) {
-      const it = ITEMS.find(x => x.weapon === sl.w), on = sl.w === weapon;
+      const it = ITEMS.find(x => x.weapon === sl.w), on = sl.w === weapon || sl.w === element;
       if (on) { ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sl.x, y, sz * 0.68, 0, Math.PI * 2); ctx.stroke(); }
       ctx.globalAlpha = on ? 1 : 0.7;
       if (it) ctx.drawImage(itemSprite(it), sl.x - sz / 2, y - sz / 2, sz, sz);
@@ -4651,6 +4672,7 @@
     if (eff.hs > 0) chips.push([`SPEED+${eff.hs}`, 0, '#ff9e40']);
     if (eff.laser > 0) chips.push(['LASER', 0, eff.magnet > 0 ? '#b388ff' : '#ff3b3b']);
     else if (weapon !== 'normal') chips.push([WEAPONS[weapon].name, 0, (WEAPONS[weapon].colors || ['#ffb74d'])[1]]);
+    if (element) chips.push([WEAPONS[element].name, 0, WEAPONS[element].colors[0]]);
     if (eff.ghost > 0) chips.push(['GHOST', eff.ghost, '#9aa0b8']);
     if (balls.length > 1) chips.push([`●×${balls.length}`, 0, '#ffffff']);
     ctx.font = 'bold 10px -apple-system, sans-serif';
@@ -5534,7 +5556,7 @@
     return {
       balls: packBalls(), px: paddle.x, py: paddle.y, pw: paddle.w,
       br: bricks.map(b => [b.alive, b.hp, b.reviveT, b.revived]),
-      score, lives, state, rally, chain, stageTime, windT, bossDone, combo, comboT, brickScroll, scrollPause, brickTotal, weapon, owned: [...owned],
+      score, lives, state, rally, chain, stageTime, windT, bossDone, combo, comboT, brickScroll, scrollPause, brickTotal, weapon, element, owned: [...owned],
       items: items.map(i => ({ ...i })), eff: { ...eff }, fever, feverGauge,
       boss: boss ? { ...boss } : null, shots: shots.map(x => ({ ...x })),
     };
@@ -5553,7 +5575,7 @@
     aliveCount = bricks.reduce((n, b) => n + (b.alive && countable(b) ? 1 : 0), 0);
     if (sn.brickTotal) brickTotal = sn.brickTotal;
     ({ score, lives, state, rally, chain, stageTime, windT, bossDone, fever, feverGauge } = sn);
-    combo = sn.combo || 0; comboT = sn.comboT || 0; weapon = sn.weapon || 'normal'; owned = new Set(sn.owned || []); brickScroll = sn.brickScroll || 0; scrollPause = sn.scrollPause || 0;
+    combo = sn.combo || 0; comboT = sn.comboT || 0; weapon = sn.weapon || 'normal'; element = sn.element || null; owned = new Set(sn.owned || []); brickScroll = sn.brickScroll || 0; scrollPause = sn.scrollPause || 0;
     items = sn.items.map(i => ({ ...i }));
     Object.assign(eff, sn.eff);
     boss = sn.boss ? { ...sn.boss } : null;
